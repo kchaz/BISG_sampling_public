@@ -1,4 +1,4 @@
-**This repo contains publicly available code for the paper** "Improving Minority Population Sampling with BISG Probabilities:\\ Evidence from a Survey of Jewish Americans" by Kyla Chasalow, Eitan Hirsh, Kosuke Imai, and Laura Royden (2026)
+**This repo contains publicly available code for the paper** "Improving Minority Population Sampling with BISG Probabilities: Evidence from a Survey of Jewish Americans" by Kyla Chasalow, Eitan Hirsh, Kosuke Imai, and Laura Royden (2026)
 
 Due to the sensitive nature of developing surname-based membership probabilities for a minority population, we are not publicly releasing the obituary data or probabilities learned from the obituary data. However, this repo contains a fully simulated version of our pipeline and methods constructed using data from the American Jewish Population Project to minimic some of the features of our actual application.
 
@@ -27,8 +27,6 @@ Due to the sensitive nature of developing surname-based membership probabilities
 * `figures` is for any figures created by scripts in src
 
 * `results` is for any outputs from simulation that are not figures
-
-
 
 ---
 
