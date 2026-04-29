@@ -40,7 +40,7 @@ Due to the sensitive nature of developing surname-based membership probabilities
 2. `sampling_tools.R`
 3. `simulation_tools.R`
 
-**Plots**
+**Main run files (in order)**
 
 1. `1_simulate_surname_lists.R` - build stable lists of fake surnames
 2. `2_simulate_data_generation_plots.R` - generates plots showing features of data simulation approach
