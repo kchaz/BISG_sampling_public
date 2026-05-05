@@ -22,7 +22,7 @@ Due to the sensitive nature of developing surname-based membership probabilities
   
   * `sampler` - scripts that implement sampler for heirarchical Bayesian model
   
-  * `simulation`  - scripts to run simulated pipeline. Main s cript
+  * `simulation`  - scripts to run simulated pipeline. 
 
 `figures` is for any figures created by scripts in src
 
