@@ -8,15 +8,15 @@ Due to the sensitive nature of developing surname-based membership probabilities
 
 ----------------------
 
-`data` contains 
-
-* * `data/AJPP_data/` data downloaded from Brandeis University’s American Jewish Population Project (https://ajpp.brandeis.edu/) on August 10, 2024 and our processed version
+`data` 
+  
+  * `data/AJPP_data/` data downloaded from Brandeis University’s American Jewish Population Project (https://ajpp.brandeis.edu/) on August 10, 2024 and our processed version
   
   * `data/AJPP_objects` key probability distributions we calculated using the AJPP data
   
   * `data/simulated` directory where data created by simulation are written
 
-* `src` contains
+`src` 
   
   * `dataprep` - scripts that do AJPP data processing and some general processing helpers
   
@@ -24,9 +24,9 @@ Due to the sensitive nature of developing surname-based membership probabilities
   
   * `simulation`  - scripts to run simulated pipeline. Main s cript
 
-* `figures` is for any figures created by scripts in src
+`figures` is for any figures created by scripts in src
 
-* `results` is for any outputs from simulation that are not figures
+`results` is for any outputs from simulation that are not figures
 
 ---
 
