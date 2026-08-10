@@ -250,7 +250,7 @@ Rcpp::List sample_bounded_line(double ai, double aj,
 
 // gamma prior, default exp(1/10)
 // [[Rcpp::export]]
-double dcprior(double eta, double lambda1 = 1, double lambda2 = 1/10, bool log = true){
+double d_eta_prior(double eta, double lambda1 = 1, double lambda2 = 1/10, bool log = true){
   // int l;
   // if (log){
   //   l = 1;
@@ -273,7 +273,8 @@ double eta_proposal_generator(double eta) {
 // [[Rcpp::export]]
 double eta_proposal_evaluator(double eta, double etanew, bool log) {
   int log_flag = log ? 1 : 0;
-  double log_density = R::dnorm(std::log(etanew / eta), 0, 1, log_flag);
+  double log_density = std::log(etanew / eta);
+  //double log_density = R::dnorm(std::log(etanew / eta), 0, 1, log_flag); //note: old version missing Jacobian
   return log_density;
 }
 
@@ -361,8 +362,11 @@ double mp_eta_accept_ratio(NumericMatrix D, NumericVector ng,
                          bool log =  true,
                          int option = 2){
 
-  double priorpart = dcprior(etanew, lambda1, lambda2, log) - dcprior(eta, lambda1, lambda2, log);
-  double gammapart = std::lgamma(etanew) - std::lgamma(eta);
+  double priorpart = d_eta_prior(etanew, lambda1, lambda2, log) - d_eta_prior(eta, lambda1, lambda2, log);
+
+  // gamma part - L is number of strata
+  int L = ng.size();
+  double gammapart = L * (std::lgamma(etanew) - std::lgamma(eta));
 
   // probability like ratio part 1
   double p1;

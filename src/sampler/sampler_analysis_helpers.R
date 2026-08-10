@@ -258,7 +258,7 @@ analyze_rho <- function(out, ng, burnin = 1, upper = NULL){
   )
   colnames(rho_mat) <- names(ng)
 
-  # obtain posterior mean of rho for each state by averaging over chain, subsetting to burnin:upper
+  # obtain posterior mean of rho for each state by averaging over chain
   rho_postmean <- colMeans(rho_mat)
 
   # obtain the mean rho across each state for each iteration

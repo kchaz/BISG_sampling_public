@@ -100,7 +100,7 @@ R_sample_bounded_line <- function(ai, aj,
 #' -------------------------------------------------------------------
 #' c scaling up/down proposal generator, evaluater + eta prior function
 #' -------------------------------------------------------------------
-R_dcprior <- function(eta, lambda1 = 1, lambda2 = 1 / 10, log = T) {
+R_d_eta_prior <- function(eta, lambda1 = 1, lambda2 = 1 / 10, log = T) {
   return(dgamma(eta, shape = lambda1, rate = lambda2, log = log))
 }
 
@@ -110,7 +110,8 @@ R_eta_proposal_generator <- function(eta) {
 }
 
 R_eta_proposal_evaluator <- function(eta, etanew, log = T) {
-  dnorm(log(etanew / eta), mean = 0, sd = 1, log = log)
+  log(etanew / eta)
+  #dnorm(log(etanew / eta), mean = 0, sd = 1, log = log) #old version missing Jacobian
 }
 
 #' ----------------------------------------------------------------
@@ -154,14 +155,15 @@ R_mp_eta_accept_ratio <- function(D, ng, etanew, eta, a, lambda1, lambda2,
   stopifnot(eta > 0 & etanew > 0)
 
   # prior part
-  priorpart <- R_dcprior(etanew,
+  priorpart <- R_d_eta_prior(etanew,
     lambda1 = lambda1,
     lambda2 = lambda2,
     log = T
-  ) - R_dcprior(eta, lambda1 = lambda1, lambda2 = lambda2, log = T)
+  ) - R_d_eta_prior(eta, lambda1 = lambda1, lambda2 = lambda2, log = T)
 
   # gamma part
-  gammapart <- lgamma(etanew) - lgamma(eta)
+  L <- length(ng)
+  gammapart <- L * (lgamma(etanew) - lgamma(eta))
 
   # probability ratio likelihood part 1
   if (option == 1) {
