@@ -10,13 +10,17 @@ library(coda) #gelman-rubin diagnostics
 
 source("simulation_tools.R")
 
-# Load simulation results
-results_savepath = "../../results/simulation"
-true_val_path = fs::path(glue("{results_savepath}/true_probabilities"))
-per_setting_results_path = fs::path(glue("{results_savepath}/per_setting_results"))
-grid_filepath = fs::path(glue("{results_savepath}/grid_results.csv"))
-tempfile_path = fs::path(glue("{results_savepath}/tempfiles"))
+save_path = "results/"
+true_val_path = fs::path(glue("{save_path}/true_probabilities"))
+per_setting_results_path = fs::path(glue("{save_path}/per_setting_results"))
+grid_filepath = fs::path(glue("{save_path}/grid_results.csv"))
+
+#df = read.csv(grid_filepath)
+
+tempfile_path = fs::path(glue("{save_path}/tempfiles"))
 df = merge_tf_csvs(tempfile_path, pattern = "^tf_.*\\.csv$")
+
+
 
 
 #-------------------------------------------------------------------------------
@@ -36,7 +40,7 @@ get_leaf_raw_outputs <- function(base, pattern = "raw_output\\.RDS$") {
     list.files(d, pattern = pattern, full.names = TRUE)
   })
 
-  # keep only dirs that actually have files ending in raw_output.RDS
+  # keep only dirs that actually have raw_output.RDS
   keep <- lengths(raw_by_dir) > 0
   raw_by_dir <- raw_by_dir[keep]
   names(raw_by_dir) <- dirs[keep]  # name each element by its leaf directory path
@@ -61,7 +65,8 @@ theme_for_all_plots <- function(p, base_size = 14, grid = F) {
 }
 
 # Analysis for a single setting
-single_analysis <- function(files_to_process, results_savepath,
+single_analysis <- function(files_to_process,
+                            save_path,
                             create_density_plots = F,
                             create_trace_plots = T){
 
@@ -105,6 +110,19 @@ single_analysis <- function(files_to_process, results_savepath,
   a_chains = aperm(a_chains, perm = c(2,3,1))  # Reshape to fit required order
 
 
+  # Same process with the rho mat if exists (added this to code later so some
+  # earlier outputs might not have it)
+  if("rho_mat" %in% names(output_list[[1]])) {
+    rho_mat_list <- lapply(output_list, function(x){x$rho_mat})
+    rho_chains <- abind::abind(rho_mat_list, along = 3)
+    dimnames(rho_chains) <- list("Iteration" = NULL,
+                                 "State" = colnames(output_list[[1]]$rho_mat),
+                                 "Chain" = 1)
+    rho_chains = aperm(rho_chains, perm = c(1,3,2))  # Reshape to fit required order
+  } else{
+    rho_chains = NULL
+  }
+
   bayesplot::color_scheme_set("mix-blue-pink")
 
 
@@ -115,7 +133,7 @@ single_analysis <- function(files_to_process, results_savepath,
     p = mcmc_dens_overlay(a_chains, pars = rowname_subset)
     p <- theme_for_all_plots(p, 14)
 
-    ggplot2::ggsave(filename = fs::path(glue("{results_savepath}/a_chains_density_plot.pdf")),
+    ggplot2::ggsave(filename = fs::path(glue("{save_path}/a_chains_density_plot.pdf")),
                     plot = p,
                     width = 15,
                     height = 8,
@@ -123,14 +141,16 @@ single_analysis <- function(files_to_process, results_savepath,
 
     p = mcmc_dens_overlay(eta_chains, pars = "eta_scale")
     p <- theme_for_all_plots(p,14)
-    ggplot2::ggsave(filename = fs::path(glue("{results_savepath}/eta_chains_density_plot.pdf")),
+    ggplot2::ggsave(filename = fs::path(glue("{save_path}/eta_chains_density_plot.pdf")),
                     plot = p,
                     width = 8,
                     height = 4,
                     device = "pdf")
+
   }
 
   if(create_trace_plots){
+
     # Trace Plots
     p = mcmc_trace(a_chains, pars = rowname_subset)
     p <- theme_for_all_plots(p, 14) +
@@ -142,7 +162,7 @@ single_analysis <- function(files_to_process, results_savepath,
         axis.title.x = element_text(size = 20, margin = margin(t = 8)),
         axis.title.y = element_text(size = 20, margin = margin(t = 8))
       )
-    ggplot2::ggsave(filename = fs::path(glue("{results_savepath}/a_chains_trace_plot.pdf")),
+    ggplot2::ggsave(filename = fs::path(glue("{save_path}/a_chains_trace_plot.pdf")),
                     plot = p,
                     width = 15,
                     height = 8,
@@ -156,11 +176,29 @@ single_analysis <- function(files_to_process, results_savepath,
         axis.title.x = element_text(size = 20, margin = margin(t = 8)),
         axis.title.y = element_text(size = 20, margin = margin(t = 8))
       )
-    ggplot2::ggsave(filename = fs::path(glue("{results_savepath}/eta_chains_trace_plot.pdf")),
+    ggplot2::ggsave(filename = fs::path(glue("{save_path}/eta_chains_trace_plot.pdf")),
                     plot = p,
                     width = 10,
                     height = 4,
                     device = "pdf")
+
+    if(!is.null(rho_chains)){
+      state_subset = c("NY", "FL","TX","WY")
+      p = mcmc_trace(rho_chains, pars = state_subset)
+      p <- theme_for_all_plots(p, 14) +
+        labs(x = "Iteration",
+             y = expression(rho[g] ~ "parameter value")
+        ) +
+        theme(
+          axis.title.x = element_text(size = 20, margin = margin(t = 8)),
+          axis.title.y = element_text(size = 20, margin = margin(t = 8))
+        )
+      ggplot2::ggsave(filename = fs::path(glue("{save_path}/rho_chains_trace_plot.pdf")),
+                      plot = p,
+                      width = 8,
+                      height = 4,
+                      device = "pdf")
+    }
   }
 }
 
@@ -170,22 +208,28 @@ raw_lists <- get_leaf_raw_outputs(per_setting_results_path)
 #----------------------------------------------------------------------------
 
 # Add multi-chain trace plots to each directory
-for (results_savepath in names(raw_lists)){
-  print(results_savepath)
-  files_to_process = raw_lists[[results_savepath]]
+for (save_path in names(raw_lists)){
+  print(save_path)
+  files_to_process = raw_lists[[save_path]]
   single_analysis(files_to_process = files_to_process,
-                  results_savepath = results_savepath,
+                  save_path = save_path,
                   create_density_plots = F,
                   create_trace_plots = T)
 }
 
 
+# files_to_process = raw_lists$`results/MCMC_simulation/per_setting_results/names100/n100000/alpha_uniform/num_iter_10000`
+# single_analysis(files_to_process = raw_lists$`results/MCMC_simulation/per_setting_results/names100/n100000/alpha_uniform/num_iter_10000`,
+#                             save_path = "results/MCMC_simulation/per_setting_results/names100/n100000/alpha_uniform/num_iter_10000",
+#                             create_density_plots = F,
+#                             create_trace_plots = T)
+
+
 #-------------------------------------------------------------------------------
 # GELMAN-RUBIN Diagnostics
 #-------------------------------------------------------------------------------
-#TODO: revisit this.
-# code below continues from the code that is now in single_analysis() above
-# but may be out of date.
+#TODO: for now, not focusing on this - might revisit later
+#TODO: code below continues from the code that is now in single_analysis() above
 #
 # # Convert to format needed for Gelman-Rubin
 # a_mcmc_list = vector("list", n_chains)

@@ -258,7 +258,9 @@ generate_sampling_frame <- function(pmat, pmat_flip, n1, pR1, p_state_gvn_R1,
   dfrare <- create_df(pmat, n = n1, props = p_state_gvn_R1, fips_mode = F)
   dfrare$rare_status = rep(1, n1)
 
-  n0 = round(n1/pR1)
+  # want n1/(n1+n0) = pR1
+  # Solving htis yields n0 = n1 * (1-p)/p
+  n0 = round(n1 * (1-pR1)/pR1)
   dfnotrare <- create_df(pmat_flip, n = n0, props = p_state_gvn_R0, fips_mode = F)
   dfnotrare$rare_status = rep(0, n0)
 

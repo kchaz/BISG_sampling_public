@@ -5,35 +5,31 @@ library(ggExtra)
 library(scales)
 library(forcats)
 
-set.seed(543)
+
+set.seed(543)  # for reproducibility
+
 source("sampling_tools.R")
 source("data_generators.R")
 
-#----------------------
-# Set-up
-#----------------------
-
 # AJPP info
-pR1 = .02 # rounded version of actual
-p_R1_gvn_state = readRDS("../../data/AJPP_objects/p_R1_gvn_state.RDS")
-p_R0_gvn_state = readRDS("../../data/AJPP_objects/p_R0_gvn_state.RDS")
-p_state_gvn_R1 = readRDS("../../data/AJPP_objects/p_state_gvn_R1.RDS")
-p_state_gvn_R0 = readRDS("../../data/AJPP_objects/p_state_gvn_R0.RDS")
+p_R1_gvn_state = readRDS("../../Data/DataObjects/p_R1_gvn_state.RDS")
+p_R0_gvn_state = readRDS("../../Data/DataObjects/p_R0_gvn_state.RDS")
+p_state_gvn_R1 = readRDS("../../Data/DataObjects/p_state_gvn_R1.RDS")
+p_state_gvn_R0 = readRDS("../../Data/DataObjects/p_state_gvn_R0.RDS")
+pR1 = .02
 
 # State information
-df_states <- read_csv("../../data/states.csv")
+df_states <- read_csv("../../Data/states.csv")
 df_states = df_states[order(df_states$Abbreviation),] #make sure alphabetical order by abbreviation, not state name!
 
 # Surname info
-surnames <- readRDS(paste0("../../data/simulated/surnames10000.RDS"))
 n_names = 500
+surnames <- readRDS(paste0("simulated_data/surnames10000.RDS"))
 surnames = surnames[1:n_names]
 
-# Target sample size and sampling frame sizes to mimic true rate of
-# rare population in our application
-Target = 1000
+Target = 1000 #target sample size
 sf_size = 1200000
-n1 = ceiling(sf_size/(1/.02+1)) #number of rare population members
+n1 = ceiling(sf_size * .02)
 
 # Set-up Simulation
 nsim = 100
@@ -44,20 +40,25 @@ get_sampling_prob_suite <- function(sampling_frame, p_R1_gvn_state, Target){
 
   # Get per-state targets
   #-----------------------
+
+  # group_targets = get_per_state_targets_strat(Target,
+  #                                       sampling_frame,
+  #                                       p_R1_gvn_state)
+
   group_targets = get_per_state_targets_pois(Target,
                                               sampling_frame,
                                               p_R1_gvn_state)
 
-
-  # Baseline - Random sample, still with targets from each state
+  # Baselines
   #---------------------------------------------------------
+  # Random sample, still with targets from each state
   sampling_frame$random_sample_per_state = 1
   sampling_frame = get_rescaled_sampling_probs(sampling_frame,
                                               group_column = "state",
                                               group_targets = group_targets,
                                               probability_column =  "random_sample_per_state",
                                               new_prob_column_name = "random_sample_per_state",
-                                              fix_greater_than_1_probs = T
+                                              fix_greater_than_1_probs = T #TODO: think about what to do with this
                                               )
 
   # create scaled sampling prob based on real Pr(R=1|s,g)
@@ -67,15 +68,18 @@ get_sampling_prob_suite <- function(sampling_frame, p_R1_gvn_state, Target){
                                                group_targets = group_targets,
                                                probability_column = "p_R1_gvn_surname_state",
                                                new_prob_column_name = "targeted_prob",
-                                               fix_greater_than_1_probs = T
+                                               fix_greater_than_1_probs = T #TODO: think about what to do with this
                                                )
 
 
   prob_options = c("random_sample_per_state",
                    "targeted_prob")
+                   #qcolnames
+                   #prec_colnames)
 
   nice_labels = c("Random sample in each state",
                   "Surname-state probabilities")
+
 
   run_checks(sampling_frame, Target,
              prob_columns = prob_options,
@@ -88,10 +92,8 @@ get_sampling_prob_suite <- function(sampling_frame, p_R1_gvn_state, Target){
 
 }
 
-# Note that with fix_greater_than_1_probs = T
-# I did an ad hoc fix of setting prob > 1 to 1
-# This only happening for the very large beta...
-# TODO: come back to this
+#TODO: Note that I did a temp fix of setting prob > 1 to 1
+#This only happening for the very large beta...
 
 
 holder = data.frame()
@@ -155,7 +157,6 @@ holder_long <- holder %>%
     yield  = as.numeric(yield)
   )
 
-
 holder_long$single_method = paste0(holder_long$method, ", β=", holder_long$beta)
 holder_long$single_method[grepl("Random sample in each state", holder_long$single_method)] = "Random sample in each state"
 
@@ -185,7 +186,7 @@ p <- ggplot(holder_long, aes(x = yield, y = single_method)) +
     )
 print(p)
 
-fig_save_path = "../../figures/simulation"
+fig_save_path = "../../paper/Figures/Simulation"
 ggsave(
   filename = file.path(fig_save_path, "sampling_yield.pdf"),
   plot = p,
@@ -194,3 +195,62 @@ ggsave(
   device = cairo_pdf,  # high-quality vector text rendering
   dpi = 600
 )
+
+
+# # prepare data
+# yield = nrare/nvals
+# colnames(yield) <- prob_options
+# yield_long <- as.data.frame(yield) |>
+#   pivot_longer(everything(), names_to = "prob_option", values_to = "yield") |>
+#   mutate(prob_option = factor(prob_option, levels = prob_options))
+#
+# # x-axis range (start at 0)
+# x_min <- 0
+# x_max <- max(yield_long$yield, na.rm = TRUE)
+#
+# p_box <- ggplot(yield_long, aes(x = yield, y = prob_option)) +
+#   geom_boxplot(
+#     fill = "#89CFF0",        # light blue
+#     color = "gray20",
+#     outlier.alpha = 0.4,
+#     width = 0.6
+#   ) +
+#   scale_y_discrete(labels = setNames(nice_labels, prob_options)) +
+#   scale_x_continuous(
+#     limits = c(x_min, x_max),
+#     expand = expansion(mult = c(0, 0.02)),
+#     labels = scales::number_format(accuracy = 0.01)
+#   ) +
+#   labs(
+#     title = glue("Comparison of Success Rates in Sampling Rare Group"),
+#     subtitle = glue("{nsim} repeat samples per method"),
+#     x = "Proportion of Rare Population Sampled",
+#     y = NULL
+#   ) +
+#   theme_minimal(base_size = 16) +
+#   theme(
+#     plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+#     axis.title.x = element_text(size = 15, face = "bold"),
+#     axis.text.x  = element_text(size = 15),
+#     axis.text.y  = element_text(size = 15, face = "bold"),
+#     panel.grid.minor = element_blank(),
+#     legend.position = "none",
+#     panel.border = element_rect(color = "gray", fill = NA, linewidth = 0.2)
+#   )
+#
+# print(p_box)
+
+
+# # Plot sampling probabilities for rare vs not rare
+# par(mfrow = c(1, 2))
+#
+# for (option in prob_options) {
+#   boxplot(
+#     sampling_frame[[option]] ~ sampling_frame$rare_status,
+#     main = paste("Sampling with", option),
+#     xlab = "Non-Rare (R=0) vs Rare (R=1)",
+#     ylab = "Sampling Probability",
+#     cex.lab = 1.5,
+#     col = c("lightblue", "lightgreen")
+#   )
+# }

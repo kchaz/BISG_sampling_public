@@ -3,7 +3,7 @@
 # Not saving anything but the plots
 #------------------------------------------------------------
 
-library(readr)
+library(readr) # for loading data
 library(gtools) # for rdirichlet
 library(tidyverse)
 library(glue)
@@ -11,8 +11,8 @@ library(ggplot2)
 library(ggExtra)
 library(scales)
 
-set.seed(21)
 
+set.seed(21)
 source("data_generators.R") #functions for simulating data
 
 
@@ -21,45 +21,43 @@ source("data_generators.R") #functions for simulating data
 ################################################################################
 
 # State information
-df_states <- read_csv("../../data/states.csv")
+df_states <- read_csv("../../Data/states.csv")
 df_states = df_states[order(df_states$Abbreviation),] #make sure alphabetical order by abbreviation, not state name!
 n_states <- dim(df_states)[1]
 
 # AJPP info
-pR1 = readRDS("../../data/AJPP_objects/pR1.RDS")
-p_state_gvn_R1 = readRDS("../../data/AJPP_objects/p_state_gvn_R1.RDS")
-p_state_gvn_R0 = readRDS("../../data/AJPP_objects/p_state_gvn_R0.RDS")
-p_R1_gvn_state = readRDS("../../data/AJPP_objects/p_R1_gvn_state.RDS")
-p_R0_gvn_state = readRDS("../../data/AJPP_objects/p_R0_gvn_state.RDS")
+pR1 = readRDS("../../Data/DataObjects/pR1.RDS")
+p_state_gvn_R1 = readRDS("../../Data/DataObjects/p_state_gvn_R1.RDS")
+p_state_gvn_R0 = readRDS("../../Data/DataObjects/p_state_gvn_R0.RDS")
+p_R1_gvn_state = readRDS("../../Data/DataObjects/p_R1_gvn_state.RDS")
+p_R0_gvn_state = readRDS("../../Data/DataObjects/p_R0_gvn_state.RDS")
+
 
 # Surname Settings - toggle this to reproduce different simulations in the paper
-surnames <- readRDS(paste0("../../data/simulated/surnames10000.RDS"))
-n_names <- 500 # can set up to 10000
+n_names <- 500 #
+surnames <- readRDS(paste0("simulated_data/surnames10000.RDS"))
 surnames = surnames[1:n_names]
 
-# surname distribution for R=1 group
+
+# Surname distribution for R=1 group
 pmat = get_pmat(df_states$Abbreviation, surnames, rate = 1)
 pmarg = get_p_surname_gvn_R1(pmat, p_state_gvn_R1)
 
-# sampling frame size settings
+# Size settings
 sf_size = 1200000 #target sampling frame size
 n1 = ceiling(sf_size/(1/.02+1)) #number of rare population members
 
-# obituary data size settings
-n <- 100000
-
-# filepath to save figures
-fig_save_path = "../../figures/simulation"
 
 
 ################################################################################
 # Simulate Obituary Data
 ################################################################################
-
+n <- 100000
 df <- create_df(pmat, n = n,  props = p_state_gvn_R1, fips_mode = F)
 
 # Plot characteristics
 #---------------------------
+fig_save_path = "../../paper/Figures/Simulation"
 pdf(file.path(fig_save_path, "surname_probabilities.pdf"), width = 14, height = 5)
 par(
   mfrow = c(1, 2),
@@ -100,25 +98,18 @@ dev.off()
 
 
 #################################################################################
-# SAMPLING FRAME
-# Generate a single fake sampling frame with ground truth labels
+# SAMPLING FRAME - single version
+#
+# Generate a fake sampling frame situation with ground truth labels
 # For simulating sampling purposes. Make rare population realistically rare
+
 #################################################################################
-
-# Set how different R=0 group is from R=1 group
 beta = 1000
-
-# Get R=0 group P(s|g,R=0) probabilities
 pmat_flip = flip_probabilities(pmat, sd = 1, beta = beta)
 
-# Generate frame
-sampling_frame = sampling_frame = generate_sampling_frame(pmat,
-                                                          pmat_flip,
-                                                          n1,
-                                                          pR1,
-                                                          p_state_gvn_R1,
-                                                          p_R1_gvn_state,
-                                                          p_R0_gvn_state)
+sampling_frame = sampling_frame = generate_sampling_frame(pmat, pmat_flip,
+                                                          n1, pR1, p_state_gvn_R1,
+                                                          p_R1_gvn_state, p_R0_gvn_state)
 
 # --- Count and normalize ---
 counts <- table(sampling_frame$surname, sampling_frame$rare_status)
@@ -170,7 +161,7 @@ ggsave(
   plot = p_with_marginals,
   width = 8,       # inches
   height = 8,      # inches
-  device = cairo_pdf,
+  device = cairo_pdf,  # high-quality vector text rendering
   dpi = 600
 )
 
@@ -234,6 +225,8 @@ q <- ggplot(sampling_frame, aes(x = p_R1_gvn_surname_state)) +
     panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.6)  # light gray borders
   )
 
+print(q)
+
 ggsave(
   filename = file.path(fig_save_path, "R1_probabilities_R0_vs_R1.pdf"),
   plot = q,
@@ -242,3 +235,28 @@ ggsave(
   device = cairo_pdf,  # high-quality vector text rendering
   dpi = 600
 )
+
+
+#
+# #test example - shows this function flips things and smooths
+# #so R=1 dist is more peaked at certain values and those especially high for
+# #R=1 are low for R=0...consistent with R=0 being a more mixed group?
+# pmat = get_pmat(df_states$Abbreviation, surnames)
+# pmat_flip = flip_probabilities(pmat, sd = 1, beta = 10)
+# par(mfrow = c(1, 1))
+# i = 10
+# state = colnames(pmat)[i]
+# u = max(pmat[, i], pmat_flip[,i])
+# plot(pmat[,i], pmat_flip[,i], ylim = c(0,u), xlim = c(0,u),
+#      xlab = glue("Surname probabilities for R=1 in {state}"),
+#      ylab = glue("Surname probabilities for R=0 in {state}")
+# )
+# abline(0,1, lty = 2)
+#
+#
+# q = get_p_R1_gvn_state_surname(pmat, pmat_flip, p_R1_gvn_state, p_R0_gvn_state)
+# hist(q)
+
+
+
+

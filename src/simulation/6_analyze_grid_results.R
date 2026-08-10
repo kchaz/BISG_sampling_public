@@ -1,18 +1,47 @@
 library(tidyverse)
 library(glue)
 library(bayesplot)
+library(coda) #gelman-rubin diagnostics
 
 source("simulation_tools.R")
 
-results_savepath = "../../results/simulation/"
-figure_savepath = "../../figures/simulation/"
+save_path = "results/"
+true_val_path = fs::path(glue("{save_path}/true_probabilities"))
+per_setting_results_path = fs::path(glue("{save_path}/per_setting_results"))
 
-true_val_path = fs::path(glue("{results_savepath}/true_probabilities"))
-per_setting_results_path = fs::path(glue("{results_savepath}/per_setting_results"))
-
-tempfile_path = fs::path(glue("{results_savepath}/tempfiles"))
+tempfile_path = fs::path(glue("{save_path}/tempfiles"))
 df = merge_tf_csvs(tempfile_path, pattern = "^tf_.*\\.csv$")
 df$n_label <- format(df$n, scientific = FALSE, big.mark = ",") #for plotting
+
+#
+# #Old code from when had a single csv file system
+#
+#grid_filepath = fs::path(glue("{save_path}/grid_results.csv"))
+#df = read.csv(grid_filepath)
+#df$theta_mle_TV = df$theta_mle_TV/51
+#df$theta_postmean_TV = df$theta_postmean_TV/51
+#write.csv(df, grid_filepath, row.names = F)
+
+#
+# #Code for manual corrections
+#
+# # list all .csv files in the directory
+# csv_files <- list.files(
+#   path = tempfile_path,
+#   pattern = "\\.csv$",
+#   full.names = TRUE
+# )
+#
+# # loop over files
+# for (f in csv_files) {
+#   temp_df <- read.csv(f, check.names = FALSE)
+#
+#   # rename columns
+#   #names(temp_df) <- sub("^c_", "eta_", names(temp_df))
+#
+#   # overwrite the original file
+#   #write.csv(temp_df, f, row.names = FALSE)
+# }
 
 # Get stats
 max(df$a_max_accept_prop)
@@ -20,26 +49,29 @@ min(df$a_min_accept_prop)
 mean(df$a_mean_prop_accept)
 mean(df$a_min_accept_prop == 0)
 
-mean(df$eta_rate)
-max(df$eta_rate)
-min(df$eta_rate)
+mean(df$eta_postmean_2000)
+# mean(df$eta_rate)
+# max(df$eta_rate)
+# min(df$eta_rate)
 
 # Get stats by num_sur - see goes up with higher num_sur
 mean(df$a_mean_prop_accept[df$num_sur == 100])
 mean(df$a_mean_prop_accept[df$num_sur == 1000])
 mean(df$a_mean_prop_accept[df$num_sur == 10000])
 
-mean(df$eta_rate[df$num_sur == 100])
-mean(df$eta_rate[df$num_sur == 1000])
-mean(df$eta_rate[df$num_sur == 10000])
+mean(df$postmean_rho_mean[df$num_sur == 100])
+mean(df$postmean_rho_mean[df$num_sur == 1000])
+mean(df$postmean_rho_mean[df$num_sur == 10000])
+
 
 # Get stats for the specific example given in paper
 df %>% filter(num_sur == 10000 &
-              n == 50000 &
+              n == 100000 &
               alpha_init_option == "uniform"
               ) %>%
   summarize(amean = mean(a_mean_prop_accept),
-            cmean = mean(eta_rate))
+            cmean = mean(eta_postmean_2000))
+
 
 
 #--------------------------------------
@@ -143,7 +175,7 @@ p_rho = ggplot(
     panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
     panel.grid.minor = element_blank()
   )
-ggplot2::ggsave(filename = fs::path(glue("{figure_savepath}/rho_plot.pdf")),
+ggplot2::ggsave(filename = fs::path(glue("{save_path}/rho_plot.pdf")),
                 plot = p_rho,
                 width = 16,
                 height = 8,
@@ -221,7 +253,7 @@ plotter <- function(df,
     param_label <- "\u03B8"
   }
 
-  # Avoid chaing df_plot since also need it for 2nd plot
+  # Avoid changing df_plot since also need it for 2nd plot
   df_iter    <- df_plot %>% filter(!is.na(estimator_iter))
   df_no_iter <- df_plot %>% filter(is.na(estimator_iter))
 
@@ -375,13 +407,13 @@ p = out$plot1
 q = out$plot2
 print(p)
 print(q)
-ggplot2::ggsave(filename = fs::path(glue("{figure_savepath}/alpha_grid_results.pdf")),
+ggplot2::ggsave(filename = fs::path(glue("{save_path}/alpha_grid_results.pdf")),
                 plot = p,
                 width = 16,
                 height = 8,
                 device = cairo_pdf # so that alpha shows up
                 )
-ggplot2::ggsave(filename = fs::path(glue("{figure_savepath}/alpha_grid_results2.pdf")),
+ggplot2::ggsave(filename = fs::path(glue("{save_path}/alpha_grid_results2.pdf")),
                 plot = q,
                 width = 16,
                 height = 8,
@@ -395,15 +427,22 @@ q = out$plot2
 print(p)
 print(q)
 
-ggplot2::ggsave(filename = fs::path(glue("{figure_savepath}/theta_grid_results.pdf")),
+ggplot2::ggsave(filename = fs::path(glue("{save_path}/theta_grid_results.pdf")),
                 plot = p,
                 width = 16,
                 height = 8,
                 device = cairo_pdf # so that alpha shows up
 )
-ggplot2::ggsave(filename = fs::path(glue("{figure_savepath}/theta_grid_results2.pdf")),
+ggplot2::ggsave(filename = fs::path(glue("{save_path}/theta_grid_results2.pdf")),
                 plot = q,
                 width = 16,
                 height = 8,
                 device = cairo_pdf # so that alpha shows up
 )
+
+#-------------------------------------------------------------------------------
+# Accept Rate Stats - don't need, have these saved and calculated in grid file
+#-------------------------------------------------------------------------------
+# stats = lapply(output_list, get_sampler1_accept_stats, burnin = 1)
+# stats = do.call(rbind, lapply(stats, as.data.frame))
+# stats$run = 1:n_chains
