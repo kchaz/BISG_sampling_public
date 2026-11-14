@@ -68,7 +68,5 @@ deprecated
 SimulationObjects/
 cluster_outputs/
 
-Data/test
-Data/ObitData
 results/
 simulated_data/
