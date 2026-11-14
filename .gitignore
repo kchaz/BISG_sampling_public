@@ -52,19 +52,14 @@ rsconnect/
 .jupyter
 .ipynb_checkpoints
 
-
-
 # may sometimes be exceptions to this
 *.pdf
 *.tex
 *.xlsx
-
-Deprecated-Private/
-Deprecated/
-deprecated
+*.csv
+*.docx
 *Shortcut.lnk
-SimulationObjects/
-cluster_outputs/
 
+deprecated/
 results/
 simulated_data/
