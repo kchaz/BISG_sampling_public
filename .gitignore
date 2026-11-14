@@ -54,12 +54,10 @@ rsconnect/
 
 
 
-# may sometimes be exceptions to this but generally working in quarto (so not tex) and not committing pdf files formed from them. Also avoid committing data for now
+# may sometimes be exceptions to this
 *.pdf
 *.tex
-*.csv  
 *.xlsx
-*.docx
 
 Deprecated-Private/
 Deprecated/
