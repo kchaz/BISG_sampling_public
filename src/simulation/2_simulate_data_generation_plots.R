@@ -1,13 +1,16 @@
-#------------------------------------------------------------
-# Small run of simulation for creating illustrative plots
-# Not saving anything but the plots
-#------------------------------------------------------------
+#
+# Author: Kyla Chasalow
+#
+# Small run of simulation for creating illustrative plots that
+# appear in paper
+#
 
 library(readr) # for loading data
 library(gtools) # for rdirichlet
 library(tidyverse)
 library(glue)
 library(ggplot2)
+library(patchwork)
 library(ggExtra)
 library(scales)
 
@@ -15,22 +18,21 @@ library(scales)
 set.seed(21)
 source("data_generators.R") #functions for simulating data
 
-
 ################################################################################
 # Set-up
 ################################################################################
 
 # State information
-df_states <- read_csv("../../Data/states.csv")
+df_states <- read_csv("../../data/states.csv")
 df_states = df_states[order(df_states$Abbreviation),] #make sure alphabetical order by abbreviation, not state name!
 n_states <- dim(df_states)[1]
 
 # AJPP info
-pR1 = readRDS("../../Data/DataObjects/pR1.RDS")
-p_state_gvn_R1 = readRDS("../../Data/DataObjects/p_state_gvn_R1.RDS")
-p_state_gvn_R0 = readRDS("../../Data/DataObjects/p_state_gvn_R0.RDS")
-p_R1_gvn_state = readRDS("../../Data/DataObjects/p_R1_gvn_state.RDS")
-p_R0_gvn_state = readRDS("../../Data/DataObjects/p_R0_gvn_state.RDS")
+pR1 = readRDS("../../data/DataObjects/pR1.RDS")
+p_state_gvn_R1 = readRDS("../../data/DataObjects/p_state_gvn_R1.RDS")
+p_state_gvn_R0 = readRDS("../../data/DataObjects/p_state_gvn_R0.RDS")
+p_R1_gvn_state = readRDS("../../data/DataObjects/p_R1_gvn_state.RDS")
+p_R0_gvn_state = readRDS("../../data/DataObjects/p_R0_gvn_state.RDS")
 
 
 # Surname Settings - toggle this to reproduce different simulations in the paper
@@ -55,46 +57,142 @@ n1 = ceiling(sf_size/(1/.02+1)) #number of rare population members
 n <- 100000
 df <- create_df(pmat, n = n,  props = p_state_gvn_R1, fips_mode = F)
 
-# Plot characteristics
-#---------------------------
-fig_save_path = "../../paper/Figures/Simulation"
-pdf(file.path(fig_save_path, "surname_probabilities.pdf"), width = 14, height = 5)
-par(
-  mfrow = c(1, 2),
-  mar = c(6, 6, 1.5, 1),
-  mgp = c(4, 1.0, 0),   # move label slightly farther from axis
-  las = 1
+# Surname prob plot
+h <- hist(pmarg, breaks = 25, plot = FALSE)
+hist_df <- data.frame(
+  xmin = head(h$breaks, -1),
+  xmax = tail(h$breaks, -1),
+  density = h$density
 )
-# Panel (a): Histogram of P(s | R=1)
-hist(
-  pmarg,
-  breaks = 25,
-  freq   = FALSE,
-  col    = "gray80",
-  border = "white",
-  main   = "",
-  xlab   = "Surname probabilities marginalized over state",
-  ylab   = "Density",
-  cex.axis = 1.2,
-  cex.lab  = 1.3
+i <- 9
+j <- 10
+
+scatter_df <- data.frame(
+  x = pmat[, i],
+  y = pmat[, j]
 )
-grid(col = "gray90", lty = "dotted")
-# Panel (b): Pairwise simulated probabilities
-i <- 9; j <- 10
-plot(
-  pmat[, i],
-  pmat[, j],
-  pch = 19,
-  cex = 1.2,
-  col = rgb(0, 0, 0, 0.6),
-  xlab = glue("Surname probabilities for {colnames(pmat)[i]}"),
-  ylab = glue("Surname probabilities for {colnames(pmat)[j]}"),
-  cex.axis = 1.2,
-  cex.lab  = 1.3
+
+# Approximate base R's automatic axis ticks, including its 4% padding
+base_breaks <- function(x) {
+  limits <- range(x, finite = TRUE)
+  if (diff(limits) == 0) return(pretty(limits))
+  limits <- limits + c(-1, 1) * 0.04 * diff(limits)
+  grDevices::axisTicks(limits, log = FALSE)
+}
+
+
+base_theme <- theme_classic(base_size = 18, base_family = "sans") +
+  theme(
+    text = element_text(colour = "black"),
+
+    plot.title = element_text(
+      size = 26,
+      face = "bold",
+      hjust = 0.5,
+      margin = margin(b = 16)
+    ),
+    plot.title.position = "panel",
+
+    plot.tag = element_text(
+      size = 26,
+      face = "bold",
+      hjust = 0,
+      vjust = 1
+    ),
+    plot.tag.position = c(0, 1),
+    axis.title = element_text(size = 22),
+    axis.title.x = element_text(margin = margin(t = 14)),
+    axis.title.y = element_text(margin = margin(r = 14)),
+    axis.text = element_text(size = 18, colour = "black"),
+    axis.text.x = element_text(margin = margin(t = 6)),
+    axis.text.y = element_text(
+      angle = 0,
+      margin = margin(r = 6)
+    ),
+
+    axis.line = element_line(linewidth = 0.5),
+    axis.ticks = element_line(linewidth = 0.5),
+    axis.ticks.length = grid::unit(4, "pt"),
+
+    panel.grid.major = element_line(
+      colour = "grey90",
+      linewidth = 0.35
+    ),
+    panel.grid.minor = element_blank(),
+    panel.ontop = FALSE,
+
+    legend.title = element_text(size = 20),
+    legend.text = element_text(size = 18),
+    legend.key = element_blank(),
+
+    plot.background = element_rect(fill = "white", colour = NA),
+    plot.margin = margin(t = 16, r = 20, b = 16, l = 16)
+  )
+
+p_a <- ggplot(hist_df) +
+  geom_rect(
+    aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = density),
+    fill = "black", colour = "white", linewidth = 0.4
+  ) +
+  scale_x_continuous(
+    limits = range(h$breaks),
+    breaks = base_breaks(h$breaks),
+    expand = expansion(mult = 0.04)
+  ) +
+  scale_y_continuous(
+    limits = c(0, max(h$density)),
+    breaks = base_breaks(c(0, h$density)),
+    expand = expansion(mult = 0.04)
+  ) +
+  labs(
+    title = "Distribution of Surname Probabilities",
+    x = "Surname probabilities, marginalized over state",
+    y = "Density",
+    tag = "A"
+  ) +
+  base_theme
+
+p_b <- ggplot(scatter_df, aes(x, y)) +
+  geom_point(shape = 16, size = 2.5, alpha = 0.6) +
+  geom_abline(
+    intercept = 0, slope = 1,
+    linetype = "dashed", linewidth = 0.45, colour = "gray40"
+  ) +
+  scale_x_continuous(
+    breaks = base_breaks(scatter_df$x),
+    expand = expansion(mult = 0.04)
+  ) +
+  scale_y_continuous(
+    breaks = base_breaks(scatter_df$y),
+    expand = expansion(mult = 0.04)
+  ) +
+  # Prevent the reference line from affecting the plotted ranges
+  coord_cartesian(
+    xlim = range(scatter_df$x, finite = TRUE),
+    ylim = range(scatter_df$y, finite = TRUE)
+  ) +
+  labs(
+    title = "Comparing Surname Probabilities of Two States",
+    x = sprintf("Surname probabilities for %s", colnames(pmat)[i]),
+    y = sprintf("Surname probabilities for %s", colnames(pmat)[j]),
+    tag = "B"
+  ) +
+  base_theme
+
+surname_plot <- p_a + p_b + plot_layout(ncol = 2, widths = c(1, 1))
+
+fig_save_path <- "figures"
+fs::dir_create(fig_save_path)
+
+ggsave(
+  filename = file.path(fig_save_path, "surname_probabilities.pdf"),
+  plot = surname_plot,
+  device = "pdf",
+  width = 20,
+  height = 10,
+  units = "in",
+  bg = "white"
 )
-abline(0, 1, lty = "dashed", lwd = 1.2, col = "gray40")
-grid(col = "gray90", lty = "dotted")
-dev.off()
 
 
 #################################################################################
@@ -136,10 +234,23 @@ p_scatter <- ggplot(plotdf, aes(x = prob_1, y = prob_0, label = surname)) +
   labs(
     x = "Fraction of R = 1 observations with surname s",
     y = "Fraction of R = 0 observations with surname s",
-    title = "Comparison of Surname Observation Frequencies"
+    title = "A. Comparison of Surname Frequencies"
   ) +
-  theme_minimal(base_size = 12) +
-  theme(plot.title = element_text(face = "bold", size = 16))
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 26,
+      margin = margin(b = 15)
+    ),
+    axis.title.x = element_text(size = 20, margin = margin(t = 12)),
+    axis.title.y = element_text(size = 20, margin = margin(r = 12)),
+    axis.text = element_text(size = 16, color = "black"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90", linewidth = 0.4),
+    plot.margin = margin(15, 20, 15, 15),
+  )
+
 
 # Add marginal histograms (top & right)
 p_with_marginals <- ggMarginal(
@@ -159,8 +270,8 @@ print(p_with_marginals)
 ggsave(
   filename = file.path(fig_save_path, "surname_probabilities_R0_vs_R1.pdf"),
   plot = p_with_marginals,
-  width = 8,       # inches
-  height = 8,      # inches
+  width = 12,       # inches
+  height = 10,      # inches
   device = cairo_pdf,  # high-quality vector text rendering
   dpi = 600
 )
@@ -208,25 +319,30 @@ q <- ggplot(sampling_frame, aes(x = p_R1_gvn_surname_state)) +
       beta = label_parsed  # parse math expressions for beta labels
     )
   ) +
+  scale_y_continuous(
+    limits = c(0, NA),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
   labs(
-    title = "Probability of Being in Rare Population by Rare Population Status",
+    title = "B. Probability of Being in Rare Population by Rare Population Status",
     x = "Probability of being in rare population given surname and state",
     y = "Count"
   ) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 16) +
   theme(
-    plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+    plot.title = element_text(face = "bold", size = 22,
+                              hjust = 0.5,
+                              margin = margin(b = 15)),
     strip.text = element_text(face = "bold", size = 18),
     panel.grid.minor = element_blank(),
-    axis.title.x = element_text(size = 15, face = "bold"),
+    panel.grid.major = element_line(color = "gray90", linewidth = 0.4),
+    axis.title.x = element_text(size = 20, margin = margin(t = 12)),
+    axis.title.y = element_text(size = 20, margin = margin(r = 12)),
     axis.text.x  = element_text(size = 15),
-    axis.title.y = element_text(size = 15, face = "bold"),
     axis.text.y  = element_text(size = 15),
-    panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.6)  # light gray borders
+    panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.6),  # light gray borders
+    plot.margin = margin(15, 20, 15, 15),
   )
-
-print(q)
-
 ggsave(
   filename = file.path(fig_save_path, "R1_probabilities_R0_vs_R1.pdf"),
   plot = q,
@@ -235,28 +351,3 @@ ggsave(
   device = cairo_pdf,  # high-quality vector text rendering
   dpi = 600
 )
-
-
-#
-# #test example - shows this function flips things and smooths
-# #so R=1 dist is more peaked at certain values and those especially high for
-# #R=1 are low for R=0...consistent with R=0 being a more mixed group?
-# pmat = get_pmat(df_states$Abbreviation, surnames)
-# pmat_flip = flip_probabilities(pmat, sd = 1, beta = 10)
-# par(mfrow = c(1, 1))
-# i = 10
-# state = colnames(pmat)[i]
-# u = max(pmat[, i], pmat_flip[,i])
-# plot(pmat[,i], pmat_flip[,i], ylim = c(0,u), xlim = c(0,u),
-#      xlab = glue("Surname probabilities for R=1 in {state}"),
-#      ylab = glue("Surname probabilities for R=0 in {state}")
-# )
-# abline(0,1, lty = 2)
-#
-#
-# q = get_p_R1_gvn_state_surname(pmat, pmat_flip, p_R1_gvn_state, p_R0_gvn_state)
-# hist(q)
-
-
-
-

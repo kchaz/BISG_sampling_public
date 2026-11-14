@@ -1,3 +1,10 @@
+//
+// Author: Kyla Chasalow
+//
+// AI Use: used GPT-4 for help with converting R functions to Rcpp code. This
+// was not done all at once but line-by-line with many intermediary checks and
+// human review to make sure outputs are the same as the original R functions.
+//
 #include <Rcpp.h>
 using namespace Rcpp;
 
@@ -545,7 +552,7 @@ List run_eta_update(NumericMatrix D,
 // Main Function: Sampler 1
 //-------------------------------------------------------------------------
 // [[Rcpp::export]]
-List runMCMC1(NumericMatrix D,
+List runMCMC(NumericMatrix D,
               NumericVector ng,
               int niter,
               NumericVector init_a,

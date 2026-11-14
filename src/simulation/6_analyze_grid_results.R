@@ -1,3 +1,9 @@
+#
+# Author: Kyla Chasalow
+#
+# Analyze files created by 5_ script
+#
+
 library(tidyverse)
 library(glue)
 library(bayesplot)
@@ -13,46 +19,14 @@ tempfile_path = fs::path(glue("{save_path}/tempfiles"))
 df = merge_tf_csvs(tempfile_path, pattern = "^tf_.*\\.csv$")
 df$n_label <- format(df$n, scientific = FALSE, big.mark = ",") #for plotting
 
-#
-# #Old code from when had a single csv file system
-#
-#grid_filepath = fs::path(glue("{save_path}/grid_results.csv"))
-#df = read.csv(grid_filepath)
-#df$theta_mle_TV = df$theta_mle_TV/51
-#df$theta_postmean_TV = df$theta_postmean_TV/51
-#write.csv(df, grid_filepath, row.names = F)
-
-#
-# #Code for manual corrections
-#
-# # list all .csv files in the directory
-# csv_files <- list.files(
-#   path = tempfile_path,
-#   pattern = "\\.csv$",
-#   full.names = TRUE
-# )
-#
-# # loop over files
-# for (f in csv_files) {
-#   temp_df <- read.csv(f, check.names = FALSE)
-#
-#   # rename columns
-#   #names(temp_df) <- sub("^c_", "eta_", names(temp_df))
-#
-#   # overwrite the original file
-#   #write.csv(temp_df, f, row.names = FALSE)
-# }
 
 # Get stats
 max(df$a_max_accept_prop)
 min(df$a_min_accept_prop)
 mean(df$a_mean_prop_accept)
 mean(df$a_min_accept_prop == 0)
-
 mean(df$eta_postmean_2000)
-# mean(df$eta_rate)
-# max(df$eta_rate)
-# min(df$eta_rate)
+
 
 # Get stats by num_sur - see goes up with higher num_sur
 mean(df$a_mean_prop_accept[df$num_sur == 100])
@@ -439,10 +413,3 @@ ggplot2::ggsave(filename = fs::path(glue("{save_path}/theta_grid_results2.pdf"))
                 height = 8,
                 device = cairo_pdf # so that alpha shows up
 )
-
-#-------------------------------------------------------------------------------
-# Accept Rate Stats - don't need, have these saved and calculated in grid file
-#-------------------------------------------------------------------------------
-# stats = lapply(output_list, get_sampler1_accept_stats, burnin = 1)
-# stats = do.call(rbind, lapply(stats, as.data.frame))
-# stats$run = 1:n_chains

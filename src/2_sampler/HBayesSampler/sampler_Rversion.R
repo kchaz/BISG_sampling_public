@@ -1,8 +1,10 @@
-#' This script is for general helpers used by multiple samplers
-#'
-#' R_ before the function indicates I have also implemented an Rcpp version
+#' This script contains helpers and the final sampler function, all implemented
+#' in R. The R_ before each function indicates I have also implemented an Rcpp version
 #'
 #' By: Kyla Chasalow
+#'
+#' AI use: none
+#'
 #------------------------------------------------------------
 
 #' L is vector of indices (possibly in shuffled order)
@@ -317,15 +319,22 @@ R_run_eta_update <- function(D, ng, a, eta, lambda1, lambda2,
 #' Main Function
 #'----------------------------------------------------------------------
 #' Note that initialization is saved as part of chain - first element
-R_runMCMC1 <- function(D, ng, niter, init_a, init_eta,
-                     lambda1, lambda2, gam,
-                     testmode = F, verbose = F,
-                     option = 2,
-                     increment = 1, #only store every <increment> element of chains
-                     means_burnin = 1 #at what point to start accumulating the posterior means - init alway discarded and not part of this count
+R_runMCMC <- function(D,
+                      ng,
+                      niter,
+                      init_a,
+                      init_eta,
+                      lambda1,
+                      lambda2,
+                      gam,
+                      testmode = F, verbose = F,
+                      option = 2, #these do the same thing. One is slower but with less risk of numeric overflow
+                      increment = 1, #only store every <increment> element of chains
+                      means_burnin = 1 #at what point to start accumulating the posterior means - init is always discarded and not part of this count
                      ) {
 
   stopifnot(round(increment) == increment)
+  stopifnot(option == 1 | option == 2)
 
   num_sur <- nrow(D)
   group_indices <- seq(1, num_sur, 2) # entries mark first in every group from L below

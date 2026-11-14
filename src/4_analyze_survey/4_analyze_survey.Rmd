@@ -1,0 +1,3366 @@
+---
+title: "Final Main and Appendix Charts and Analysis"
+author: "Laura Royden"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    keep_md: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  dev = c("png", "pdf")
+)
+```
+
+
+```{r packages, include=FALSE}
+library(tidyverse)
+library(anesrake)
+library(readxl)
+library(purrr)
+library(knitr)
+library(haven)
+library(survey)
+library(kableExtra)
+library(stringr)
+library(fuzzyjoin)
+
+```
+
+
+```{r data loading and cleaning, cache=TRUE}
+# read in data and clean 
+
+data <- read_excel("/data/survey_for_analysis_100125.xlsx")
+
+data <- data %>%
+    mutate(
+    jewish = case_when(
+      religmod == "Jewish" ~ 1,
+      
+      # atheist, agnostic, nothing in particular, or NA but ID as Jewish
+      (religmod %in% c("Atheist", "Agnostic", "Nothing in particular") | is.na(religmod)) &
+        relconsider_1 == "Yes, consider myself this" ~ 1,
+      
+      # "something else" but also ID as jewish and doesn't identify as another religion in text
+      religmod == "Something else (please specify)" &
+        relconsider_1 == "Yes, consider myself this" &
+        (is.na(religmod_11_text) |
+           religmod_11_text %in% c(
+             "Secular Jew",
+             "Atheist-Humanist",
+             "Non religious Jew",
+             "secular jewish",
+             "Humanist",
+             "Secular Humanist",
+             "Jewish socially, agnostic religiously",
+             "secular Jewish",
+             "You’re affiliation w Harvard makes you anti-semetic",
+             "Human Being",
+             "Secular",
+             "spiritual Jew",
+             "Non practicing Jew",
+             "Earth based practices but raised Jewish",
+             "Culturally Jewish, but agnostic",
+             "Spiritual",
+             "Raised Jewish, not observant",
+             "Former Jew"
+           )
+        ) ~ 1,
+      
+      TRUE ~ 0
+    )
+  )
+
+# read in pew data
+pew <- read_dta("/data/pew2020/Jewish Americans in 2020 Extended Dataset.dta")
+
+# make pew data survey design
+pew <- pew %>%
+  # filter out for self ID jew by religion or culture/ethnicity
+  filter(JEWISHCAT < 3) %>%  mutate(across(c(SEXASK, AGE4CAT, PARTY, REGION), ~ as_factor(.x, levels = "default"))) %>%
+  # make into factor
+  mutate(across(
+    c(BRANCH, ATTEND1, JEWIMP, MEMSYN1, KOSHER, SEDER,
+      OWNOB_A, OWNOB_B, OWNOB_C, OWNOB_D, MITZVAH, BELONG, JFRIEND),
+    ~ as_factor(.x, levels = "default") 
+  ))
+
+# define pew survey design
+pew.svy <- svydesign(ids = ~1, data = pew, weights = ~EXTWEIGHT)
+
+
+# create unique rowid
+data$caseid <- 1:nrow(data)
+
+# create birthdecade column
+data <- data %>%
+  mutate(birthdecade = if_else(
+    !is.na(birthyear),
+    paste0(str_sub(birthyear, 1, 3), "0s"),
+    NA_character_
+  )
+  ) %>%
+  mutate(
+    birth_year = as.numeric(substr(birthdate, nchar(birthdate) - 3, nchar(birthdate))),
+    age = 2025 - birth_year
+  ) %>%
+  mutate(
+  responded = if_else(`_merge` == "Matched (3)", 1, 0)
+) %>%
+  mutate(sampled = if_else(`_merge` == "Master only (1)", 0, 1))
+
+```
+
+```{r weights, include=FALSE}
+# post-stratify to our sample ---------------------------------------------
+
+# identify the population (all rows) and survey sample (Matched (3))
+pop <- data
+sample <- pop %>% filter(`_merge` == "Matched (3)") %>% filter(jewish ==1 )
+
+# calculate population marginal probabilities
+pop_margins <- list(
+  state = prop.table(table(pop$state)),
+  gender = prop.table(table(pop$gender)),
+  party = prop.table(table(pop$party)),
+  birthdecade = prop.table(table(pop$birthdecade))
+)
+
+# turn sample into factors
+sample <- sample %>%
+  mutate(
+    state = factor(state, levels = names(pop_margins$state)),
+    gender = factor(gender, levels = names(pop_margins$gender)),
+    party = factor(party, levels = names(pop_margins$party)),
+    birthdecade = factor(birthdecade, levels = names(pop_margins$birthdecade))
+  )
+
+# create named list of sample variables
+sample_vars <- list(
+  state = sample$state,
+  gender = sample$gender,
+  party = sample$party,
+  birthdecade = sample$birthdecade
+)
+
+# get weights -- have to turn sample into data.frame because it hates tibbles
+rake_result <- anesrake(
+  pop_margins,
+  as.data.frame(sample),
+  caseid = sample$caseid,
+)
+
+# add raked weights to sample df
+sample$weight_raked <- rake_result$weightvec
+
+rm(pop, pop_margins, rake_result, sample_vars)
+
+
+
+# pew weights -------------------------------------------------------------
+
+# get marginal probabilities
+
+pew_margins <- list(
+  gender.pew = prop.table(svytable(~SEXASK, design = pew.svy)),
+  age.pew = prop.table(svytable(~AGE4CAT, design = pew.svy)),
+  party.pew = prop.table(svytable(~PARTY, design = pew.svy)),
+  region = prop.table(svytable(~REGION, design = pew.svy))
+)
+
+# set classifications for states into census regions
+northeast <- c("CT", "ME", "MA", "NH", "RI", "VT", "NJ", "NY", "PA")
+midwest   <- c("IL", "IN", "MI", "OH", "WI", "IA", "KS", "MN", "MO", "NE", "ND", "SD")
+south     <- c("DE", "FL", "GA", "MD", "NC", "SC", "VA", "DC", "WV",
+               "AL", "KY", "MS", "TN", "AR", "LA", "OK", "TX")
+west      <- c("AZ", "CO", "ID", "MT", "NV", "NM", "UT", "WY",
+               "AK", "CA", "HI", "OR", "WA")
+
+# add new columns to match with pew
+sample <- sample %>%
+  mutate(
+    gender.pew = recode(gender,
+                        "M" = "1 = MALE",
+                        "F" = "2 = FEMALE",
+                        .default = "99 = NOT ANSWERED"
+    ),
+    
+    age.pew = case_when(
+      !is.na(birthyear) & birthyear >= 1996 ~ "18-29",
+      birthyear >= 1974 & birthyear <= 1995 ~ "30-49",
+      birthyear >= 1960 & birthyear <= 1973 ~ "50-64",
+      birthyear < 1960 ~ "65+",
+      TRUE ~ "NO ANSWER"
+    ),
+    
+    party.pew = recode(party,
+                       "Republican" = "1 = REPUBLICAN",
+                       "Democratic" = "2 = DEMOCRAT",
+                       "Registered Independent" = "3 = INDEPENDENT",
+                       "Non-Partisan" = "3 = INDEPENDENT",
+                       "Libertarian" = "4 = SOMETHING ELSE",
+                       "Constitution" = "4 = SOMETHING ELSE",
+                       "Independence" = "4 = SOMETHING ELSE",
+                       "American Independent" = "4 = SOMETHING ELSE",
+                       "Other" = "4 = SOMETHING ELSE",
+                       "Unknown" = "99 = NOT ANSWERED",
+                       .default = "99 = NOT ANSWERED"
+    ),
+    
+    region = case_when(
+      state %in% northeast ~ "NORTHEAST",
+      state %in% midwest ~ "MIDWEST",
+      state %in% south ~ "SOUTH",
+      state %in% west ~ "WEST",
+      TRUE ~ "99 = NOT ANSWERED"
+    )) %>%
+  mutate(
+    gender.pew = factor(gender.pew, levels = names(pew_margins$gender.pew)),
+    age.pew    = factor(age.pew,    levels = names(pew_margins$age)),
+    party.pew  = factor(party.pew,  levels = names(pew_margins$party.pew)),
+    region = factor(region, levels = names(pew_margins$region))
+  )
+
+# rake to pew
+rake_result <- anesrake(
+  pew_margins,
+  dataframe = as.data.frame(sample),
+  caseid = sample$caseid
+)
+
+sample$weight_pew_raked <- rake_result$weightvec
+
+
+rm(pew_margins, rake_result, midwest, northeast, south, west)
+
+```
+
+
+```{r ipw-weights}
+# IPW weight --------------------------------------------------------------
+
+# get IPW weights
+sample <- sample %>%
+  mutate(weight_ipw = 1/sampling_prob)
+
+# trim in different levels for sensitivity testing
+sample <- sample %>%
+  mutate(weight_ipw_10 = case_when(
+    weight_ipw > quantile(sample$weight_ipw, probs = 0.90) ~ quantile(sample$weight_ipw, probs = 0.90),
+    weight_ipw < quantile(sample$weight_ipw, probs = 0.10) ~ quantile(sample$weight_ipw, probs = 0.10),
+    TRUE ~ weight_ipw
+  )) %>%
+  mutate(weight_ipw_8 = case_when(
+    weight_ipw > quantile(sample$weight_ipw, probs = 0.92) ~ quantile(sample$weight_ipw, probs = 0.92),
+    weight_ipw < quantile(sample$weight_ipw, probs = 0.08) ~ quantile(sample$weight_ipw, probs = 0.08),
+    TRUE ~ weight_ipw
+  )) %>%
+  mutate(weight_ipw_12 = case_when(
+    weight_ipw > quantile(sample$weight_ipw, probs = 0.88) ~ quantile(sample$weight_ipw, probs = 0.88),
+    weight_ipw < quantile(sample$weight_ipw, probs = 0.12) ~ quantile(sample$weight_ipw, probs = 0.12),
+    TRUE ~ weight_ipw
+  )) %>%
+  mutate(weight_ipw_5 = case_when(
+    weight_ipw > quantile(sample$weight_ipw, probs = 0.95) ~ quantile(sample$weight_ipw, probs = 0.95),
+    weight_ipw < quantile(sample$weight_ipw, probs = 0.05) ~ quantile(sample$weight_ipw, probs = 0.05),
+    TRUE ~ weight_ipw
+  ))
+
+```
+
+```{r ipw plus raking, include=FALSE, cache=TRUE}
+# post-stratify trimmed IPW to our sample ---------------------------------------------
+
+pop <- data
+# calculate population probabilities
+pop_margins <- list(
+  state = prop.table(table(pop$state)),
+  gender = prop.table(table(pop$gender)),
+  party = prop.table(table(pop$party)),
+  birthdecade = prop.table(table(pop$birthdecade))
+)
+
+# turn sample into factors
+sample <- sample %>%
+  mutate(
+    state = factor(state, levels = names(pop_margins$state)),
+    gender = factor(gender, levels = names(pop_margins$gender)),
+    party = factor(party, levels = names(pop_margins$party)),
+    birthdecade = factor(birthdecade, levels = names(pop_margins$birthdecade))
+  )
+
+# create named list of sample variables
+sample_vars <- list(
+  state = sample$state,
+  gender = sample$gender,
+  party = sample$party,
+  birthdecade = sample$birthdecade
+)
+
+# get weights -- have to turn sample into data.frame because it hates tibbles
+rake_result <- anesrake(
+  pop_margins,
+  as.data.frame(sample),
+  caseid = sample$caseid,
+  weightvec = sample$weight_ipw_10
+)
+
+# add raked weights to sample
+sample$weight_ipw_raked_sample <- rake_result$weightvec
+
+rm(pop, pop_margins, rake_result, sample_vars)
+
+
+
+# pew weights -------------------------------------------------------------
+
+pew_margins <- list(
+  gender.pew = prop.table(svytable(~SEXASK, design = pew.svy)),
+  age.pew = prop.table(svytable(~AGE4CAT, design = pew.svy)),
+  party.pew = prop.table(svytable(~PARTY, design = pew.svy)),
+  region = prop.table(svytable(~REGION, design = pew.svy))
+)
+
+
+northeast <- c("CT", "ME", "MA", "NH", "RI", "VT", "NJ", "NY", "PA")
+midwest   <- c("IL", "IN", "MI", "OH", "WI", "IA", "KS", "MN", "MO", "NE", "ND", "SD")
+south     <- c("DE", "FL", "GA", "MD", "NC", "SC", "VA", "DC", "WV",
+               "AL", "KY", "MS", "TN", "AR", "LA", "OK", "TX")
+west      <- c("AZ", "CO", "ID", "MT", "NV", "NM", "UT", "WY",
+               "AK", "CA", "HI", "OR", "WA")
+
+sample <- sample %>%
+  mutate(
+    gender.pew = recode(gender,
+                        "M" = "1 = MALE",
+                        "F" = "2 = FEMALE",
+                        .default = "99 = NOT ANSWERED"
+    ),
+    
+    age.pew = case_when(
+      !is.na(birthyear) & birthyear >= 1996 ~ "18-29",
+      birthyear >= 1974 & birthyear <= 1995 ~ "30-49",
+      birthyear >= 1960 & birthyear <= 1973 ~ "50-64",
+      birthyear < 1960 ~ "65+",
+      TRUE ~ "NO ANSWER"
+    ),
+    
+    party.pew = recode(party,
+                       "Republican" = "1 = REPUBLICAN",
+                       "Democratic" = "2 = DEMOCRAT",
+                       "Registered Independent" = "3 = INDEPENDENT",
+                       "Non-Partisan" = "3 = INDEPENDENT",
+                       "Libertarian" = "4 = SOMETHING ELSE",
+                       "Constitution" = "4 = SOMETHING ELSE",
+                       "Independence" = "4 = SOMETHING ELSE",
+                       "American Independent" = "4 = SOMETHING ELSE",
+                       "Other" = "4 = SOMETHING ELSE",
+                       "Unknown" = "99 = NOT ANSWERED",
+                       .default = "99 = NOT ANSWERED"
+    ),
+    
+    region = case_when(
+      state %in% northeast ~ "NORTHEAST",
+      state %in% midwest ~ "MIDWEST",
+      state %in% south ~ "SOUTH",
+      state %in% west ~ "WEST",
+      TRUE ~ "99 = NOT ANSWERED"
+    )
+  ) %>%
+  mutate(
+    gender.pew = factor(gender.pew, levels = names(pew_margins$gender.pew)),
+    age.pew    = factor(age.pew,    levels = names(pew_margins$age)),
+    party.pew  = factor(party.pew,  levels = names(pew_margins$party.pew)),
+    region = factor(region, levels = names(pew_margins$region))
+  ) 
+
+
+rake_result <- anesrake(
+  pew_margins,
+  dataframe = as.data.frame(sample),
+  caseid = sample$caseid,
+  weightvec = sample$weight_ipw_10
+)
+
+# add raked weights to sample
+sample$weight_ipw_raked_pew <- rake_result$weightvec
+
+rm(pop, pop_margins, rake_result, sample_vars)
+
+
+# estimated margins weights -----------------------------------------------
+
+margins <- read_csv(
+  "estimated_weights_overall_drop_missing.csv"
+)
+
+# combine ages into four categories
+age_margins <- margins %>%
+  filter(X_variable == "Age") %>%
+  mutate(
+    age = as.numeric(Variable_Level),
+    age.margins = case_when(
+      age >= 18 & age <= 29 ~ "18-29",
+      age >= 30 & age <= 49 ~ "30-49",
+      age >= 50 & age <= 64 ~ "50-64",
+      age >= 65 ~ "65+"
+    )
+  ) %>%
+  group_by(age.margins) %>%
+  summarise(estimate = sum(estimate), .groups = "drop")
+
+# combine small party categories
+party_margins <- margins %>%
+  filter(X_variable == "Party") %>%
+  mutate(
+    party.margins = case_when(
+      Variable_Level == "Democratic" ~ "Democratic",
+      Variable_Level == "Republican" ~ "Republican",
+      Variable_Level %in% c("Registered Independent", "Non-Partisan") ~
+        "Independent",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  group_by(party.margins) %>%
+  summarise(estimate = sum(estimate), .groups = "drop")
+
+gender_margins <- margins %>%
+  filter(X_variable == "Gender")
+
+# get marginal probabilities
+estimated_margins <- list(
+  gender.margins = setNames(
+    gender_margins$estimate,
+    gender_margins$Variable_Level
+  ),
+  age.margins = setNames(
+    age_margins$estimate,
+    age_margins$age.margins
+  ),
+  party.margins = setNames(
+    party_margins$estimate,
+    party_margins$party.margins
+  )
+)
+
+# ensure each set of probabilities sums to 1
+estimated_margins <- lapply(
+  estimated_margins,
+  function(x) x / sum(x)
+)
+
+# add new columns to match the margins
+sample <- sample %>%
+  mutate(
+    gender.margins = as.character(gender),
+
+    age.margins = case_when(
+      age >= 18 & age <= 29 ~ "18-29",
+      age >= 30 & age <= 49 ~ "30-49",
+      age >= 50 & age <= 64 ~ "50-64",
+      age >= 65 ~ "65+"
+    ),
+
+    party.margins = case_when(
+      party == "Democratic" ~ "Democratic",
+      party == "Republican" ~ "Republican",
+      party %in% c("Registered Independent", "Non-Partisan") ~
+        "Independent",
+      is.na(party) ~ NA_character_,
+      TRUE ~ "Other"
+    )
+  ) %>%
+  mutate(
+    gender.margins = factor(
+      gender.margins,
+      levels = names(estimated_margins$gender.margins)
+    ),
+    age.margins = factor(
+      age.margins,
+      levels = names(estimated_margins$age.margins)
+    ),
+    party.margins = factor(
+      party.margins,
+      levels = names(estimated_margins$party.margins)
+    )
+  )
+
+# AJPP regional margins ---------------------------------------------------
+
+p_state_gvn_R1 <- readRDS("p_state_gvn_R1.RDS")
+
+# set classifications for states into census regions
+northeast <- c("CT", "ME", "MA", "NH", "RI", "VT", "NJ", "NY", "PA")
+midwest   <- c("IL", "IN", "MI", "OH", "WI", "IA", "KS", "MN", "MO", "NE", "ND", "SD")
+south     <- c("DE", "FL", "GA", "MD", "NC", "SC", "VA", "DC", "WV",
+               "AL", "KY", "MS", "TN", "AR", "LA", "OK", "TX")
+west      <- c("AZ", "CO", "ID", "MT", "NV", "NM", "UT", "WY",
+               "AK", "CA", "HI", "OR", "WA")
+
+# aggregate state proportions to regions
+region_margins <- c(
+  "NORTHEAST" = sum(p_state_gvn_R1[northeast]),
+  "MIDWEST" = sum(p_state_gvn_R1[midwest]),
+  "SOUTH" = sum(p_state_gvn_R1[south]),
+  "WEST" = sum(p_state_gvn_R1[west])
+)
+
+# add region to the existing age, gender, and party targets
+estimated_margins$region.margins <- region_margins / sum(region_margins)
+
+# create matching respondent categories
+sample <- sample %>%
+  mutate(
+    region.margins = case_when(
+      state %in% northeast ~ "NORTHEAST",
+      state %in% midwest ~ "MIDWEST",
+      state %in% south ~ "SOUTH",
+      state %in% west ~ "WEST",
+      TRUE ~ NA_character_
+    ),
+    region.margins = factor(
+      region.margins,
+      levels = names(estimated_margins$region.margins)
+    )
+  )
+
+# rake to estimated margins using trimmed IPW
+rake_result <- anesrake(
+  estimated_margins,
+  dataframe = as.data.frame(sample),
+  caseid = sample$caseid,
+  weightvec = sample$weight_ipw_10
+)
+
+# add raked weights to sample
+sample$weight_ipw_raked_margins <- rake_result$weightvec
+
+rm(margins, age_margins, party_margins, gender_margins,
+   estimated_margins, rake_result)
+
+```
+
+
+
+
+
+```{r svydesigns}
+# define svydesigns -------------------------------------------------------
+
+# define survey design for post-stratify weights
+svy.raked <- svydesign(ids = ~1, data = sample, weights = ~weight_raked)
+
+# define unweighted survey design
+svy.unweighted <- svydesign(ids = ~1, data = sample, weights = ~1)
+
+# define pew raked survey design
+svy.raked.pew <- svydesign(ids = ~1, data = sample, weights = ~weight_pew_raked)
+
+# define ipw survey designs
+svy.ipw <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw)
+
+svy.ipw.5 <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw_5)
+
+svy.ipw.8 <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw_8)
+
+svy.ipw.10 <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw_10)
+
+svy.ipw.12 <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw_12)
+
+svy.ipw.raked.sample <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw_raked_sample)
+
+svy.ipw.raked.pew <- svydesign(ids = ~1, data = sample, weights = ~weight_ipw_raked_pew)
+
+svy.ipw.raked.margins <- svydesign(
+  ids = ~1,
+  data = sample,
+  weights = ~weight_ipw_raked_margins
+)
+
+```
+
+```{r  functions}
+get_results <- function(design, var, source_label) {
+  props <- svymean(as.formula(paste0("~", var)), design = design, na.rm = TRUE)
+  data.frame(
+    Estimate = coef(props),
+    SE = SE(props),
+    confint(props)
+  ) %>%
+    rename_with(~ c("CI_lower", "CI_upper"), .cols = c("X2.5..", "X97.5..")) %>%
+    rownames_to_column("Variable") %>%
+    mutate(
+      Variable = toupper(Variable),
+      Source   = source_label
+    )
+}
+
+
+
+# survey designs list 
+
+designs <- list(
+  pew          = pew.svy,
+  unweighted   = svy.unweighted,
+  raked.sample = svy.raked,  
+  raked.pew    = svy.raked.pew,
+  ipw          = svy.ipw,
+  ipw.5        = svy.ipw.5,
+  ipw.8        = svy.ipw.8,
+  ipw.10       = svy.ipw.10,
+  ipw.12       = svy.ipw.12,
+  ipw.raked.sample = svy.ipw.raked.sample,
+  ipw.raked.pew = svy.ipw.raked.pew,
+  ipw.raked.margins = svy.ipw.raked.margins
+)
+
+
+# defines the variable names
+var_map_for <- function(sample_var, pew_var) {
+  vm <- setNames(rep(sample_var, length(designs)), names(designs))
+  vm[["pew"]] <- pew_var
+  vm
+}
+
+```
+
+
+
+# Main charts and analysis
+
+## Branch
+
+
+```{r main-branch, fig.height=3, fig.width=7}
+# define variables
+var_map <- var_map_for(sample_var = "branch", pew_var = "BRANCH")
+
+# run for each design with correct variable
+branch_long <- imap_dfr(
+  designs,
+  ~ get_results(.x, var_map[[.y]], .y)
+) %>%
+  filter(Source %in% c(
+    "pew", "ipw.raked.pew", "ipw.raked.margins", "ipw.10"
+  )) %>%
+  mutate(
+    Variable = recode(
+      Variable,
+      "BRANCHREFORM"       = "Reform",
+      "BRANCHCONSERVATIVE" = "Conservative",
+      "BRANCHORTHODOX"     = "Orthodox"
+    ),
+    Variable = if_else(
+      Variable %in% c("Conservative", "Orthodox", "Reform"),
+      Variable,
+      "Something Else / None"
+    ),
+    Source = factor(
+      Source,
+      levels = c(
+        "pew", "ipw.raked.pew", "ipw.raked.margins", "ipw.10"
+      )
+    ),
+    Variable = factor(
+      Variable,
+      levels = c(
+        "Reform", "Conservative", "Orthodox",
+        "Something Else / None"
+      )
+    )
+  ) %>%
+  group_by(Source, Variable) %>%
+  summarise(
+    across(where(is.numeric), sum, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# plot results
+library(ggplot2)
+
+dodge_width <- 0.5
+
+# compute significance vs. Pew
+branch_sig <- branch_long %>%
+  group_by(Variable) %>%
+  mutate(
+    pew_est = Estimate[Source == "pew"],
+    pew_se  = SE[Source == "pew"],
+    z       = abs((Estimate - pew_est) / sqrt(SE^2 + pew_se^2)),
+    pval    = 2 * (1 - pnorm(z)),
+    sig     = pval < 0.05
+  ) %>%
+  ungroup()
+
+# source order
+legend_order <- rev(c(
+  "pew",
+  "ipw.raked.pew",
+  "ipw.raked.margins",
+  "ipw.10"
+))
+
+# offsets for significance stars
+offsets <- c(
+  "ipw.10" = -1.5,
+  "ipw.raked.margins" = -0.5,
+  "ipw.raked.pew" = 0.5,
+  "pew" = 1.5
+)
+
+branch_sig <- branch_sig %>%
+  mutate(
+    Variable = forcats::fct_rev(Variable),
+    Source = factor(Source, levels = legend_order),
+    x_pos = as.numeric(Variable) +
+      offsets[as.character(Source)] * dodge_width / 4
+  )
+
+# plot
+ggplot(
+  branch_sig,
+  aes(
+    x = Variable,
+    y = Estimate * 100,
+    color = Source,
+    group = Source
+  )
+) +
+  geom_point(
+    position = position_dodge(width = dodge_width)
+  ) +
+  geom_errorbar(
+    aes(
+      ymin = CI_lower * 100,
+      ymax = CI_upper * 100
+    ),
+    width = 0.2,
+    position = position_dodge(width = dodge_width)) +
+  # ) +
+  # geom_text(
+  #   data = subset(branch_sig, Source != "pew" & sig),
+  #   aes(
+  #     x = x_pos,
+  #     y = CI_upper * 100 + 0.6,
+  #     label = "*"
+  #   ),
+  #   size = 5,
+  #   vjust = 0,
+  #   show.legend = FALSE
+  # ) +
+  xlab("") +
+  ylab("Percent") +
+  scale_color_manual(
+    name = "Source",
+    limits = legend_order,
+    values = c(
+      "pew" = "#619CFF",
+      "ipw.raked.pew" = "#00BA38",
+      "ipw.raked.margins" = "#F8766D",
+      "ipw.10" = "#E69F00"
+    ),
+labels = c(
+  "pew" = "2020 Pew Survey",
+  "ipw.raked.pew" = "2025 BISG: IPW Raked to Pew",
+  "ipw.raked.margins" = "2025 BISG: IPW Raked to Estimated Margins",
+  "ipw.10" = "2025 BISG: IPW with 10/90 trimming only"
+)  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(
+      color = "grey85",
+      linewidth = 0.5
+    ),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5)
+  ) +
+  geom_vline(
+    xintercept = seq(1.5, 3.5, by = 1),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) +
+  coord_flip() +
+  guides(color = guide_legend(reverse = TRUE))
+
+```
+
+
+## How many of your close friends are Jewish?
+
+```{r main-jfriend plot, fig.width=7, fig.height=3, echo=FALSE}
+# get variables
+var_map <- var_map_for(sample_var = "jfriend", pew_var = "JFRIEND")
+
+# compute results for all designs
+jfr_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+jfr_raked <- jfr_all %>% filter(Source == "raked.sample") %>% select(Variable)
+jfr_pew   <- jfr_all %>% filter(Source == "pew")           %>% select(Variable)
+
+# fuzzy match
+jfr_match <- stringdist_inner_join(
+  jfr_raked, jfr_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label
+jfr_all_unified <- jfr_all %>%
+  left_join(jfr_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+jfr_plot_df <- jfr_all_unified %>%
+  filter(Source %in% c(
+    "pew", "ipw.raked.pew", "ipw.raked.margins", "ipw.10"
+  )) %>%
+  mutate(
+    Variable = str_to_title(
+      str_trim(
+        str_remove(VariableUnified, "^(JFRIEND|[0-9]+\\s*=\\s*)")
+      )
+    ),
+    # Change "Hardly Any Of Them" to "Hardly Any"
+    Variable = recode(Variable, "Hardly Any Of Them" = "Hardly Any"),
+    Variable = factor(
+      Variable,
+      levels = c(
+        "All Of Them",
+        "Most Of Them",
+        "Some Of Them",
+        "Hardly Any",
+        "None Of Them",
+        "Not Sure"
+      )
+    ),
+    Source = factor(
+      Source,
+      levels = c(
+        "pew", "ipw.raked.pew", "ipw.raked.margins", "ipw.10"
+      )
+    )
+  ) %>%
+  filter(Variable != "99 = Not Answered")  %>%
+  mutate(Variable = forcats::fct_rev(Variable)) %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+
+# plot
+
+dodge_width <- 0.5
+
+
+jfr_sig <- jfr_plot_df %>%
+group_by(Variable) %>%
+  mutate(
+    pew_est = Estimate[Source == "pew"],
+    pew_se  = SE[Source == "pew"],
+    z       = abs((Estimate - pew_est) / sqrt(SE^2 + pew_se^2)),
+    pval    = 2 * (1 - pnorm(z)),
+    sig     = pval < 0.05
+  ) %>%
+  ungroup()
+
+
+offsets <- c(
+  "ipw.10" = -1.5,
+  "ipw.raked.margins" = -0.5,
+  "ipw.raked.pew" = 0.5,
+  "pew" = 1.5
+)
+
+
+jfr_sig <- jfr_sig %>%
+  mutate(
+    x_pos = as.numeric(factor(Variable)) +
+      (offsets[as.character(Source)] * dodge_width / length(offsets))
+  )
+
+
+jfr_sig %>%
+ggplot(aes(x = Variable, y = Estimate*100, color = Source)) +
+  geom_point(position = position_dodge(width = dodge_width)) +
+  geom_errorbar(aes(ymin = CI_lower*100, ymax = CI_upper*100),
+                width = 0.2, position = position_dodge(width = dodge_width)) +
+  #   geom_text(
+  #   data = subset(jfr_sig, Source != "pew" & sig),
+  #   aes(x = x_pos - 1.3, y = CI_upper*100 + 1, label = "*", color = Source),
+  #   size = 5,
+  #   vjust = -0.5,
+  #   show.legend = FALSE
+  # ) +
+  xlab(" ") +
+  ylab("Percent") +
+  scale_color_manual(
+    name = "Source",
+    values = c(
+      "pew" = "#619CFF",
+      "ipw.raked.pew" = "#00BA38",
+      "ipw.raked.margins" = "#F8766D",
+      "ipw.10" = "#E69F00"
+    ),
+    labels = c(
+      "pew" = "2020 Pew Survey",
+      "ipw.raked.pew" = "2025 BISG: IPW Raked to Pew",
+      "ipw.raked.margins" = "2025 BISG: IPW Raked to Estimated Margins",
+      "ipw.10" = "2025 BISG: IPW with 10/90 trimming only"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) + coord_cartesian(ylim = c(0, 65))  + theme_minimal()  + theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank()
+    ) +
+    theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      5.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+## Other Measures
+```{r main-other-trimmed, fig.width=10, fig.height=5}
+# func to compute and label significance vs Pew
+compute_sig_vs_pew <- function(df) {
+  df %>%
+    group_by(VariableClean, Question) %>%
+    mutate(
+      pew_est = Estimate[Source == "pew"],
+      pew_se  = SE[Source == "pew"],
+      z       = abs((Estimate - pew_est) / sqrt(SE^2 + pew_se^2)),
+      pval    = 2 * (1 - pnorm(z)),
+      sig     = if_else(pval < 0.05, TRUE, FALSE)
+    ) %>%
+    ungroup()
+}
+
+# func to fuzzy-match Pew categories and unify variable labels
+unify_labels <- function(df, var_prefix, question_label) {
+  raked <- df %>% filter(Source == "raked.sample") %>% select(Variable)
+  pew   <- df %>% filter(Source == "pew") %>% select(Variable)
+  
+  match <- stringdist_inner_join(
+    raked, pew, by = "Variable", method = "jw", max_dist = 0.3, distance_col = "dist"
+  ) %>%
+    group_by(Variable.x) %>%
+    slice_min(dist, n = 1) %>%
+    ungroup() %>%
+    transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+  
+  df %>%
+    left_join(match, by = c("Variable" = "Var_pew")) %>%
+    mutate(
+      VariableUnified = coalesce(Var_raked, Variable),
+      VariableClean = str_to_title(
+        str_trim(str_remove(VariableUnified, paste0("^(?:", var_prefix, "|[0-9]+\\s*=\\s*)")))
+      ),
+      Question = question_label
+    ) %>%
+    select(-Var_raked, -VariableUnified)
+}
+
+# Question list: variable names and their Pew equivalents
+question_list <- list(
+  list(sample_var = "branch",   pew_var = "BRANCH",   prefix = "BRANCH",   label = "Denomination"),
+  list(sample_var = "attend1",  pew_var = "ATTEND1",  prefix = "ATTEND",   label = "Synagogue attendance"),
+  list(sample_var = "jewimp",   pew_var = "JEWIMP",   prefix = "JEWIMP",   label = "Importance of Judaism"),
+  list(sample_var = "memsyn1",  pew_var = "MEMSYN1",  prefix = "MEMSYN",   label = "Family synagogue membership"),
+  list(sample_var = "kosher",   pew_var = "KOSHER",   prefix = "KOSHER",   label = "Keeps kosher"),
+  list(sample_var = "seder",    pew_var = "SEDER",    prefix = "SEDER",    label = "Seder attendance"),
+  list(sample_var = "ownob_1",  pew_var = "OWNOB_A",  prefix = "OWNOB",    label = "Menorah ownership"),
+  list(sample_var = "ownob_2",  pew_var = "OWNOB_B",  prefix = "OWNOB",    label = "Mezuzah ownership"),
+  list(sample_var = "ownob_3",  pew_var = "OWNOB_C",  prefix = "OWNOB",    label = "Seder plate ownership"),
+  list(sample_var = "ownob_4",  pew_var = "OWNOB_D",  prefix = "OWNOB",    label = "Siddur ownership"),
+  list(sample_var = "mitzvah",  pew_var = "MITZVAH",  prefix = "MITZVAH",  label = "Had bar/bat mitzvah"),
+  list(sample_var = "belong",   pew_var = "BELONG",   prefix = "BELONG",   label = "Belonging to Jewish people")
+)
+
+# run all analyses and combine results
+all_results <- map_dfr(question_list, function(q) {
+  var_map <- var_map_for(sample_var = q$sample_var, pew_var = q$pew_var)
+  
+  res <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+  unified <- unify_labels(res, q$prefix, q$label)
+  
+  unified %>%
+    mutate(
+      Source = factor(Source, levels = c(
+        "pew", "unweighted", "raked.sample", "raked.pew",
+        "ipw", "ipw.5", "ipw.8", "ipw.12",
+        "ipw.raked.sample", "ipw.raked.pew",
+        "ipw.raked.margins", "ipw.10"
+      ))
+    ) %>%
+    filter(VariableClean != "99 = Not Answered")
+})
+
+# keep only key sources for comparison
+all_results_filtered <- all_results %>%
+  filter(Source %in% c(
+    "pew", "ipw.raked.pew", "ipw.raked.margins", "ipw.10"
+  ))
+
+# compute significance vs Pew
+all_results_sig <- compute_sig_vs_pew(all_results_filtered)
+
+# create clean output table
+final_table <- all_results_sig %>%
+  select(Question, Variable = VariableClean, Source, Estimate, SE, CI_lower, CI_upper, z, pval, sig) %>%
+  arrange(Question, Variable, Source)
+
+
+
+
+keep_pairs <- tribble(
+  ~Question,                   ~Variable,
+  "Synagogue attendance",       "1more Than Once A Week",
+  "Keeps kosher",               "Yes, I Keep Kosher And I Separate Meat And Dairy",
+  "Family synagogue membership","1yes",
+  "Menorah ownership",          "_1yes, Own This",
+  "Mezuzah ownership",          "_2yes, Own This",
+  "Had bar/bat mitzvah",        "Yes",
+  "Seder attendance",           "Yes, Held Or Attended A Seder",
+  "Seder plate ownership",      "_3yes, Own This",
+  "Siddur ownership",           "_4yes, Own This"
+)
+
+key_results <- final_table %>%
+  inner_join(keep_pairs, by = c("Question", "Variable")) %>%
+  arrange(Question, Source)
+
+
+# clean and order question labels
+key_results_clean <- key_results %>%
+  mutate(
+    QuestionLabel = case_when(
+      Question == "Synagogue attendance"          ~ "Attend Weekly+",
+      Question == "Keeps kosher"                  ~ "Keep Kosher - Strictly",
+      Question == "Family synagogue membership"   ~ "Synagogue Members",
+      Question == "Menorah ownership"             ~ "Own Menorah",
+      Question == "Mezuzah ownership"             ~ "Own Mezuzah",
+      Question == "Had bar/bat mitzvah"           ~ "Had Bar/Bat Mitzvah",
+      Question == "Seder attendance"              ~ "Held/Attended Seder",
+      Question == "Seder plate ownership"         ~ "Own Seder plate",
+      Question == "Siddur ownership"              ~ "Own Siddur",
+      TRUE ~ Question
+    ),
+    QuestionLabel = factor(
+      QuestionLabel,
+      levels = c(
+        "Attend Weekly+",
+        "Keep Kosher - Strictly",
+        "Synagogue Members",
+        "Had Bar/Bat Mitzvah",
+        "Held/Attended Seder",
+        "Own Seder plate",
+        "Own Siddur",
+        "Own Menorah",
+        "Own Mezuzah"
+        
+      )
+    )
+  ) 
+
+
+
+# add dodge width
+dodge_width <- 0.7
+dodge <- position_dodge(width = dodge_width)
+
+# build plot
+p <- ggplot(
+  key_results_clean %>% mutate(Source = fct_rev(Source)),
+  aes(x = Estimate * 100, y = QuestionLabel, color = Source)
+) +
+  geom_point(position = dodge) +
+  geom_errorbarh(
+    aes(xmin = CI_lower * 100, xmax = CI_upper * 100),
+    height = 0.25,
+    position = dodge
+  )
+
+# extract the plotted coordinates for the points
+built <- ggplot_build(p)$data[[1]]
+
+key_results_positions <- key_results_clean %>%
+  mutate(row_id = row_number()) %>%
+  left_join(
+    built %>%
+      mutate(row_id = row_number()) %>%
+      select(row_id, x_built = x, y_built = y),
+    by = "row_id"
+  )
+
+
+p +
+  geom_hline(
+    yintercept = seq(1.5, length(levels(key_results_clean$QuestionLabel)) - 0.5, 1),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.5
+  ) +
+  scale_color_manual(
+    name = "Source",
+    values = c(
+      "pew" = "#619CFF",
+      "ipw.raked.pew" = "#00BA38",
+      "ipw.raked.margins" = "#F8766D",
+      "ipw.10" = "#E69F00"
+    ),
+    labels = c(
+      "pew" = "2020 Pew Survey",
+      "ipw.raked.pew" = "2025 BISG: IPW Raked to Pew",
+      "ipw.raked.margins" = "2025 BISG: IPW Raked to Estimated Margins",
+      "ipw.10" = "2025 BISG: IPW with 10/90 trimming only"
+    ),
+    breaks = c(
+      "ipw.10", "ipw.raked.margins", "ipw.raked.pew", "pew"
+    ),
+    guide = guide_legend(reverse = TRUE)
+  ) +
+  labs(
+    x = "Percent",
+    y = "",
+  ) +
+  coord_cartesian(xlim = c(0, 100), clip = "off") +
+  theme(
+    axis.text.y = element_text(size = 12, margin = margin(r = 8)),
+    axis.text.x = element_text(size = 11),
+    axis.title.x = element_text(size = 13),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 11),
+    panel.grid.major.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.margin = margin(10, 10, 10, 20)
+  )  + theme_minimal()  + theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+    panel.grid.major.y = element_blank(), 
+      panel.grid.minor.y = element_blank()) +
+      guides(color = guide_legend(reverse = TRUE))
+
+
+
+```
+
+
+```{r main-updated-summary-statistics}
+library(dplyr)
+library(purrr)
+library(survey)
+
+# add the original nine-item count to a design
+add_behavior_count <- function(design, pew = FALSE) {
+
+  if (pew) {
+    item_variables <- c(
+      "ATTEND1", "MEMSYN1", "KOSHER", "SEDER",
+      "OWNOB_C", "OWNOB_D", "OWNOB_A", "OWNOB_B", "MITZVAH"
+    )
+
+    yes_values <- c(
+      "1 = MORE THAN ONCE A WEEK",
+      "1 = YES",
+      "1 = YES, I KEEP KOSHER AND I SEPARATE MEAT AND DAIRY",
+      "1 = YES, HELD OR ATTENDED A SEDER",
+      "1 = YES, OWN THIS",
+      "1 = YES, OWN THIS",
+      "1 = YES, OWN THIS",
+      "1 = YES, OWN THIS",
+      "1 = YES"
+    )
+  } else {
+    item_variables <- c(
+      "attend1", "memsyn1", "kosher", "seder",
+      "ownob_3", "ownob_4", "ownob_1", "ownob_2", "mitzvah"
+    )
+
+    yes_values <- c(
+      "More than once a week",
+      "Yes",
+      "Yes, I keep kosher and I separate meat and dairy",
+      "Yes, held or attended a Seder",
+      "Yes, own this",
+      "Yes, own this",
+      "Yes, own this",
+      "Yes, own this",
+      "Yes"
+    )
+  }
+
+  indicators <- map2(
+    item_variables,
+    yes_values,
+    ~as.numeric(design$variables[[.x]] == .y)
+  )
+
+  # deal with missing items
+  design$variables$beh_count_9 <- Reduce(`+`, indicators)
+
+  design
+}
+
+# prepare pew comparison design
+pew_summary_design <- subset(
+  pew.svy,
+  JEWISHCAT %in% c(1, 2)
+)
+
+pew_summary_design <- update(
+  pew_summary_design,
+  cultural_ethnic = as.numeric(JEWISHCAT == 2)
+)
+
+pew_summary_design <- add_behavior_count(
+  pew_summary_design,
+  pew = TRUE
+)
+
+# prepare BISG comparison designs
+prepare_summary_design <- function(design) {
+  design <- subset(design, jewish == 1)
+
+  design <- update(
+    design,
+    cultural_ethnic = as.numeric(religmod != "Jewish")
+  )
+
+  add_behavior_count(design, pew = FALSE)
+}
+
+summary_designs <- list(
+  "2020 Pew Survey" = pew_summary_design,
+  "IPW raked to estimated margins" =
+    prepare_summary_design(svy.ipw.raked.margins),
+  "IPW raked to Pew" =
+    prepare_summary_design(svy.ipw.raked.pew)
+)
+
+# calculate estimates, standard errors, and confidence intervals
+get_summary_stats <- function(design, estimator) {
+
+  cultural_mean <- svymean(
+    ~cultural_ethnic,
+    design = design,
+    na.rm = TRUE
+  )
+
+  cultural_prop <- svyciprop(
+    ~cultural_ethnic,
+    design = design,
+    method = "logit",
+    level = 0.95,
+    na.rm = TRUE
+  )
+
+  cultural_ci <- confint(cultural_prop)
+
+  activities_mean <- svymean(
+    ~beh_count_9,
+    design = design,
+    na.rm = TRUE
+  )
+
+  activities_ci <- confint(activities_mean, level = 0.95)
+
+  tibble(
+    Estimator = estimator,
+    Statistic = c(
+      "Cultural/ethnic but not Jewish by religion (%)",
+      "Mean number of activities (0–9)"
+    ),
+    Estimate = c(
+      as.numeric(coef(cultural_mean)) * 100,
+      as.numeric(coef(activities_mean))
+    ),
+    SE = c(
+      as.numeric(SE(cultural_mean)) * 100,
+      as.numeric(SE(activities_mean))
+    ),
+    CI_lower = c(
+      as.numeric(cultural_ci[1]) * 100,
+      as.numeric(activities_ci[1])
+    ),
+    CI_upper = c(
+      as.numeric(cultural_ci[2]) * 100,
+      as.numeric(activities_ci[2])
+    ),
+    N = c(
+      sum(!is.na(design$variables$cultural_ethnic)),
+      sum(!is.na(design$variables$beh_count_9))
+    )
+  )
+}
+
+summary_estimates <- imap_dfr(
+  summary_designs,
+  ~get_summary_stats(.x, .y)
+)
+
+# pew estimates and standard errors for the comparisons
+pew_reference <- summary_estimates %>%
+  filter(Estimator == "2020 Pew Survey") %>%
+  select(
+    Statistic,
+    Pew_estimate = Estimate,
+    Pew_SE = SE
+  )
+
+# wald tests against pew
+updated_summary_stats <- summary_estimates %>%
+  left_join(pew_reference, by = "Statistic") %>%
+  mutate(
+    Difference_vs_Pew = if_else(
+      Estimator == "2020 Pew Survey",
+      NA_real_,
+      Estimate - Pew_estimate
+    ),
+    Difference_SE = sqrt(SE^2 + Pew_SE^2),
+    z = Difference_vs_Pew / Difference_SE,
+    p_value_vs_Pew = 2 * pnorm(abs(z), lower.tail = FALSE)
+  ) %>%
+  select(
+    Estimator,
+    Statistic,
+    Estimate,
+    CI_lower,
+    CI_upper,
+    N,
+    Difference_vs_Pew,
+    p_value_vs_Pew
+  )
+
+updated_summary_stats %>%
+  knitr::kable(digits = 3)
+
+```
+
+```{r main-ipw-only-summary-statistics}
+library(dplyr)
+library(survey)
+
+# Jewish respondents, IPW with 10/90 trimming only
+ipw_summary_design <- subset(
+  svy.ipw.10,
+  jewish == 1
+)
+
+# cultural/ethnic identification and original nine behavior indicators
+ipw_summary_design <- update(
+  ipw_summary_design,
+  cultural_ethnic = as.numeric(religmod != "Jewish"),
+
+  attend_indicator = as.numeric(
+    attend1 == "More than once a week"
+  ),
+  synmem_indicator = as.numeric(
+    memsyn1 == "Yes"
+  ),
+  kosher_indicator = as.numeric(
+    kosher == "Yes, I keep kosher and I separate meat and dairy"
+  ),
+  seder_indicator = as.numeric(
+    seder == "Yes, held or attended a Seder"
+  ),
+  sederplate_indicator = as.numeric(
+    ownob_3 == "Yes, own this"
+  ),
+  siddur_indicator = as.numeric(
+    ownob_4 == "Yes, own this"
+  ),
+  menorah_indicator = as.numeric(
+    ownob_1 == "Yes, own this"
+  ),
+  mezuzah_indicator = as.numeric(
+    ownob_2 == "Yes, own this"
+  ),
+  mitzvah_indicator = as.numeric(
+    mitzvah == "Yes"
+  )
+)
+
+# Original nine-item count
+ipw_summary_design <- update(
+  ipw_summary_design,
+  beh_count_9 =
+    attend_indicator +
+    synmem_indicator +
+    kosher_indicator +
+    seder_indicator +
+    sederplate_indicator +
+    siddur_indicator +
+    menorah_indicator +
+    mezuzah_indicator +
+    mitzvah_indicator
+)
+
+# cultural/ethnic proportion and 95% confidence interval
+cultural_est <- svyciprop(
+  ~cultural_ethnic,
+  design = ipw_summary_design,
+  method = "logit",
+  level = 0.95,
+  na.rm = TRUE
+)
+
+cultural_ci <- confint(cultural_est)
+
+# mean activity count and 95% confidence interval
+activities_est <- svymean(
+  ~beh_count_9,
+  design = ipw_summary_design,
+  na.rm = TRUE
+)
+
+activities_ci <- confint(activities_est, level = 0.95)
+
+# results
+ipw_only_summary <- tibble(
+  Statistic = c(
+    "Cultural/ethnic but not Jewish by religion (%)",
+    "Mean number of activities (0–9)"
+  ),
+  Estimate = c(
+    as.numeric(coef(cultural_est)) * 100,
+    as.numeric(coef(activities_est))
+  ),
+  CI_lower = c(
+    as.numeric(cultural_ci[1]) * 100,
+    as.numeric(activities_ci[1])
+  ),
+  CI_upper = c(
+    as.numeric(cultural_ci[2]) * 100,
+    as.numeric(activities_ci[2])
+  ),
+  N = c(
+    sum(!is.na(ipw_summary_design$variables$cultural_ethnic)),
+    sum(!is.na(ipw_summary_design$variables$beh_count_9))
+  )
+)
+
+ipw_only_summary %>%
+  knitr::kable(digits = 3)
+
+```
+
+
+```{r main-practice-significance-estimated-margins}
+library(dplyr)
+library(purrr)
+library(survey)
+
+# get jewish respondents under the estimated-margin weights
+practice_design <- subset(
+  svy.ipw.raked.margins,
+  jewish == 1
+)
+
+# same nine measures and response definitions 
+practice_items <- tibble::tribble(
+  ~Measure, ~sample_var, ~pew_var, ~sample_yes, ~pew_yes,
+  "Attend more than once a week",
+  "attend1", "ATTEND1",
+  "More than once a week", "1 = MORE THAN ONCE A WEEK",
+
+  "Keep Kosher - Strictly",
+  "kosher", "KOSHER",
+  "Yes, I keep kosher and I separate meat and dairy",
+  "1 = YES, I KEEP KOSHER AND I SEPARATE MEAT AND DAIRY",
+
+  "Synagogue Members",
+  "memsyn1", "MEMSYN1",
+  "Yes", "1 = YES",
+
+  "Had Bar/Bat Mitzvah",
+  "mitzvah", "MITZVAH",
+  "Yes", "1 = YES",
+
+  "Held/Attended Seder",
+  "seder", "SEDER",
+  "Yes, held or attended a Seder",
+  "1 = YES, HELD OR ATTENDED A SEDER",
+
+  "Own Seder plate",
+  "ownob_3", "OWNOB_C",
+  "Yes, own this", "1 = YES, OWN THIS",
+
+  "Own Siddur",
+  "ownob_4", "OWNOB_D",
+  "Yes, own this", "1 = YES, OWN THIS",
+
+  "Own Menorah",
+  "ownob_1", "OWNOB_A",
+  "Yes, own this", "1 = YES, OWN THIS",
+
+  "Own Mezuzah",
+  "ownob_2", "OWNOB_B",
+  "Yes, own this", "1 = YES, OWN THIS"
+)
+
+# estimate each binary measure using its survey weights
+get_practice_estimate <- function(design, variable, yes_value) {
+  design$variables$practice_indicator <- as.numeric(
+    as.character(design$variables[[variable]]) == yes_value
+  )
+
+  estimate <- svymean(
+    ~practice_indicator,
+    design = design,
+    na.rm = TRUE
+  )
+
+  c(
+    estimate = as.numeric(coef(estimate)),
+    se = as.numeric(SE(estimate))
+  )
+}
+
+# wald tests against pew
+practice_tests <- pmap_dfr(
+  practice_items,
+  function(Measure, sample_var, pew_var, sample_yes, pew_yes) {
+
+    bisg_result <- get_practice_estimate(
+      practice_design, sample_var, sample_yes
+    )
+
+    pew_result <- get_practice_estimate(
+      pew.svy, pew_var, pew_yes
+    )
+
+    difference <- bisg_result[["estimate"]] -
+      pew_result[["estimate"]]
+
+    difference_se <- sqrt(
+      bisg_result[["se"]]^2 + pew_result[["se"]]^2
+    )
+
+    z <- difference / difference_se
+    p_value <- 2 * pnorm(abs(z), lower.tail = FALSE)
+
+    tibble(
+      Measure = Measure,
+      Pew_percent = pew_result[["estimate"]] * 100,
+      BISG_percent = bisg_result[["estimate"]] * 100,
+      Difference_percentage_points = difference * 100,
+      p_value = p_value,
+      Significant_at_5_percent = p_value < 0.05
+    )
+  }
+)
+
+practice_tests %>%
+  knitr::kable(digits = 4)
+
+# list significant results
+significant_measures <- practice_tests %>%
+  filter(Significant_at_5_percent) %>%
+  pull(Measure)
+
+if (length(significant_measures) == 0) {
+  cat("\nNo measures differ significantly from Pew at the 5% level.")
+} else {
+  cat(
+    "\nMeasures differing significantly from Pew at the 5% level:\n",
+    paste(significant_measures, collapse = "\n")
+  )
+}
+```
+
+```{r main-practice-significance-all-weights}
+library(dplyr)
+library(purrr)
+library(survey)
+
+# three weighting designs
+practice_designs <- list(
+  "IPW with 10/90 trimming only" = svy.ipw.10,
+  "IPW raked to estimated margins" = svy.ipw.raked.margins,
+  "IPW raked to Pew" = svy.ipw.raked.pew
+)
+
+# same nine measures and response definitions as the original figure
+practice_items <- tibble::tribble(
+  ~Measure, ~sample_var, ~pew_var, ~sample_yes, ~pew_yes,
+  "Attend more than once a week",
+  "attend1", "ATTEND1",
+  "More than once a week", "1 = MORE THAN ONCE A WEEK",
+
+  "Keep Kosher - Strictly",
+  "kosher", "KOSHER",
+  "Yes, I keep kosher and I separate meat and dairy",
+  "1 = YES, I KEEP KOSHER AND I SEPARATE MEAT AND DAIRY",
+
+  "Synagogue Members",
+  "memsyn1", "MEMSYN1",
+  "Yes", "1 = YES",
+
+  "Had Bar/Bat Mitzvah",
+  "mitzvah", "MITZVAH",
+  "Yes", "1 = YES",
+
+  "Held/Attended Seder",
+  "seder", "SEDER",
+  "Yes, held or attended a Seder",
+  "1 = YES, HELD OR ATTENDED A SEDER",
+
+  "Own Seder plate",
+  "ownob_3", "OWNOB_C",
+  "Yes, own this", "1 = YES, OWN THIS",
+
+  "Own Siddur",
+  "ownob_4", "OWNOB_D",
+  "Yes, own this", "1 = YES, OWN THIS",
+
+  "Own Menorah",
+  "ownob_1", "OWNOB_A",
+  "Yes, own this", "1 = YES, OWN THIS",
+
+  "Own Mezuzah",
+  "ownob_2", "OWNOB_B",
+  "Yes, own this", "1 = YES, OWN THIS"
+)
+
+# estimate each binary measure using its survey weights
+get_practice_estimate <- function(design, variable, yes_value) {
+  design$variables$practice_indicator <- as.numeric(
+    as.character(design$variables[[variable]]) == yes_value
+  )
+
+  estimate <- svymean(
+    ~practice_indicator,
+    design = design,
+    na.rm = TRUE
+  )
+
+  c(
+    estimate = as.numeric(coef(estimate)),
+    se = as.numeric(SE(estimate))
+  )
+}
+
+# compare each weighting design with pew
+practice_tests <- imap_dfr(
+  practice_designs,
+  function(design, estimator) {
+
+    # Jewish respondents only
+    design <- subset(design, jewish == 1)
+
+    pmap_dfr(
+      practice_items,
+      function(Measure, sample_var, pew_var, sample_yes, pew_yes) {
+
+        bisg_result <- get_practice_estimate(
+          design, sample_var, sample_yes
+        )
+
+        pew_result <- get_practice_estimate(
+          pew.svy, pew_var, pew_yes
+        )
+
+        difference <- bisg_result[["estimate"]] -
+          pew_result[["estimate"]]
+
+        difference_se <- sqrt(
+          bisg_result[["se"]]^2 + pew_result[["se"]]^2
+        )
+
+        z <- difference / difference_se
+        p_value <- 2 * pnorm(abs(z), lower.tail = FALSE)
+
+        tibble(
+          Estimator = estimator,
+          Measure = Measure,
+          Pew_percent = pew_result[["estimate"]] * 100,
+          BISG_percent = bisg_result[["estimate"]] * 100,
+          Difference_percentage_points = difference * 100,
+          p_value = p_value,
+          Significant_at_5_percent = p_value < 0.05
+        )
+      }
+    )
+  }
+)
+
+# full results
+practice_tests %>%
+  knitr::kable(digits = 4)
+
+# find significant measures under each weighting design
+practice_significance_summary <- practice_tests %>%
+  group_by(Estimator) %>%
+  summarise(
+    Number_significant = sum(Significant_at_5_percent),
+    Significant_measures = if (
+      any(Significant_at_5_percent)
+    ) {
+      paste(
+        Measure[Significant_at_5_percent],
+        collapse = "; "
+      )
+    } else {
+      "None"
+    },
+    .groups = "drop"
+  )
+
+practice_significance_summary %>%
+  knitr::kable()
+```
+
+# Appendix charts
+
+## Branch
+
+```{r appendix-branch-app, fig.width=12, fig.height=6}
+# weighting methods displayed in the appendix plots
+# the shared setup above also creates two additional designs
+designs <- designs[c(
+  "pew", "unweighted", "raked.pew", "ipw", "ipw.5", "ipw.8",
+  "ipw.10", "ipw.12", "ipw.raked.pew", "ipw.raked.margins"
+)]
+
+# same four denomination categories across all designs
+branch_levels <- c(
+  "Reform",
+  "Conservative",
+  "Orthodox",
+  "Something Else / None"
+)
+
+# recode before estimation so the combined category has a correct SE and CI
+branch_long <- imap_dfr(designs, function(design, source) {
+
+  variable <- if (source == "pew") "BRANCH" else "branch"
+
+  branch_text <- toupper(
+    trimws(as.character(design$variables[[variable]]))
+  )
+
+  design$variables$branch_plot <- factor(
+    case_when(
+      is.na(branch_text) ~ NA_character_,
+      branch_text == "REFORM" ~ "Reform",
+      branch_text == "CONSERVATIVE" ~ "Conservative",
+      branch_text == "ORTHODOX" ~ "Orthodox",
+      TRUE ~ "Something Else / None"
+    ),
+    levels = branch_levels
+  )
+
+  get_results(design, "branch_plot", source)
+}) %>%
+  mutate(
+    Variable = recode(
+      Variable,
+      "BRANCH_PLOTREFORM" = "Reform",
+      "BRANCH_PLOTCONSERVATIVE" = "Conservative",
+      "BRANCH_PLOTORTHODOX" = "Orthodox",
+      "BRANCH_PLOTSOMETHING ELSE / NONE" = "Something Else / None"
+    ),
+    Source = factor(
+      Source,
+      levels = c(
+        "pew", "unweighted", "raked.pew",
+        "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+        "ipw.raked.pew", "ipw.raked.margins"
+      )
+    ),
+    Variable = factor(
+      Variable,
+      levels = branch_levels
+    )
+  ) %>%
+  mutate(Variable = forcats::fct_rev(Variable)) %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+legend_order <- rev(c(
+  "pew",
+  "unweighted",
+  "raked.pew",
+  "ipw",
+  "ipw.5",
+  "ipw.8",
+  "ipw.10",
+  "ipw.12",
+  "ipw.raked.pew",
+  "ipw.raked.margins"
+))
+
+# plot results
+ggplot(branch_long, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(
+    aes(ymin = CI_lower, ymax = CI_upper),
+    width = 0.2,
+    position = position_dodge(width = 0.8)
+  ) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    limits = legend_order,
+    labels = c(
+      "pew" = "2020 Pew Survey",
+      "unweighted" = "2025 BISG Survey - Unweighted",
+      "raked.pew" = "2025 BISG Survey - Raked to Pew",
+      "ipw" = "2025 BISG Survey - IPW",
+      "ipw.5" = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8" = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10" = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12" = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew post IPW",
+      "ipw.raked.margins" =
+        "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5)
+  ) +
+  geom_vline(
+    xintercept = seq(1.5, 3.5, by = 1),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) +
+  coord_flip() +
+  guides(color = guide_legend(reverse = TRUE))
+
+```
+
+## Synagogue Attendance
+
+```{r appendix-attend plot, fig.height=8, fig.width=12, echo=FALSE}
+# get variables
+var_map <- var_map_for(sample_var = "attend1", pew_var = "ATTEND1")
+
+
+# compute results for all designs
+att_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+att_raked <- att_all %>% filter(Source == "unweighted") %>% select(Variable, Estimate:CI_upper)
+att_pew   <- att_all %>% filter(Source == "pew") %>% select(Variable, Estimate:CI_upper)
+
+# fuzzy match
+att_match <- stringdist_inner_join(
+  att_raked, att_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# apply our labels to pew and join together
+att_all_unified <- att_all %>%
+  left_join(att_match, by = c("Variable" = "Var_pew")) %>%
+  # if there is a var_raked match, use that; if not, use original
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# clean variable text 
+att_all_unified <- att_all_unified %>%
+  mutate(VariableClean = str_to_title(str_trim(str_remove(VariableUnified, "^(ATTEND1|ATTEND)"))))
+
+# define the levels we want
+att_levels <- c(
+  "More Than Once A Week", "Once A Week", "Once Or Twice A Month",
+  "A Few Times A Year, Such As For High Holidays", "Seldom", "Never"
+)
+
+att_plot_df <- att_all_unified %>%
+  # drop all other labels
+  filter(VariableClean %in% att_levels) %>%
+  # clean variable labels
+  mutate(
+    Variable = factor(str_wrap(VariableClean, width = 20),
+                      levels = str_wrap(att_levels, width = 20)),
+    Source = factor(Source,
+                    levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                               "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                               "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")))  %>%
+    mutate(Variable = forcats::fct_rev(Variable)) %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+legend_order <- rev(c(
+  "pew",
+  "unweighted",
+  "raked.pew",
+  "ipw",
+  "ipw.5",
+  "ipw.8",
+  "ipw.10",
+  "ipw.12",
+  "ipw.raked.pew",
+  "ipw.raked.margins"
+))
+
+# plot
+ggplot(att_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      5.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+
+
+
+## Importance of Judaism
+
+```{r appendix-jewimp, fig.height=6, fig.width=12, echo=FALSE}
+# define variables
+var_map <- var_map_for(sample_var = "jewimp", pew_var = "JEWIMP")
+
+
+# run results
+jewimp_long <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y)) %>%
+  mutate(
+    # clean category labels
+    Variable = str_to_title(str_trim(str_remove(Variable, "^JEWIMP"))
+    ),
+    Variable = factor(str_wrap(Variable, width = 15)),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )) %>% 
+  # drop the extra pew variables
+  filter(Variable != "Refused") %>% filter(Variable != "Undesignated") %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+# plot
+ggplot(jewimp_long, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      3.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+
+## Synagogue Membership
+
+```{r appendix-memsyn, fig.height=5, fig.width=12}
+# get variables
+var_map <- var_map_for(sample_var = "memsyn1", pew_var = "MEMSYN1")
+
+# run results for all designs
+mem_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+mem_raked <- mem_all %>% filter(Source == "unweighted") %>% select(Variable)
+mem_pew   <- mem_all %>% filter(Source == "pew")           %>% select(Variable)
+
+# fuzzy match
+mem_match <- stringdist_inner_join(
+  mem_raked, mem_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+ slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# apply our labels to pew and join together
+mem_all_unified <- mem_all %>%
+  left_join(mem_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# set order
+mem_levels <- c("Yes", "No")
+
+mem_plot_df <- mem_all_unified %>%
+  mutate(
+    VariableClean = str_to_title(str_trim(str_remove(VariableUnified, "^(MEMSYN1|MEMSYN|[0-9]+\\s*=\\s*)")))) %>%
+  # drop all other labels
+  filter(VariableClean %in% mem_levels) %>%
+    # clean variable labels
+  mutate(
+    Variable = factor(str_wrap(VariableClean, width = 20),
+                      levels = str_wrap(mem_levels, width = 20)),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12", 
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )
+  ) %>%
+    mutate(Variable = forcats::fct_rev(Variable)) %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+# plot
+ggplot(mem_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      1.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+
+## Kosher
+
+```{r appendix-kosher plot, fig.height=6, fig.width=12}
+# set variable names
+var_map <- var_map_for(sample_var = "kosher", pew_var = "KOSHER")
+
+# compute results for all designs
+kos_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+kos_raked <- kos_all %>% filter(Source == "unweighted") %>% select(Variable)
+kos_pew   <- kos_all %>% filter(Source == "pew")           %>% select(Variable)
+
+# fuzzy match
+kos_match <- stringdist_inner_join(
+  kos_raked, kos_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label
+kos_all_unified <- kos_all %>%
+  left_join(kos_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# clean labels and variable text
+kos_plot_df <- kos_all_unified %>%
+  mutate(VariableClean = str_to_title(str_trim(str_remove(VariableUnified, "^(KOSHER|[0-9]+\\s*=\\s*)"))),
+    Variable = factor(str_wrap(VariableClean, width = 20)),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12", 
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )
+  ) %>% filter(Variable != "99 = Not Answered") %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+# plot
+ggplot(kos_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      2.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+
+
+## Seder attendance
+
+```{r appendix-seder, fig.height=5, fig.width=12}
+# get variables
+var_map <- var_map_for(sample_var = "seder", pew_var = "SEDER")
+
+# compute results for all designs
+sed_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+sed_raked <- sed_all %>% filter(Source == "unweighted") %>% select(Variable)
+sed_pew   <- sed_all %>% filter(Source == "pew")           %>% select(Variable)
+
+# fuzzy match
+sed_match <- stringdist_inner_join(
+  sed_raked, sed_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label
+sed_all_unified <- sed_all %>%
+  left_join(sed_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# clean variable text 
+sed_plot_df <- sed_all_unified %>%
+  mutate(VariableClean = str_to_title(str_trim(str_remove(VariableUnified, "^(SEDER|[0-9]+\\s*=\\s*)"))),
+    Variable = factor(str_wrap(VariableClean, width = 20)),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )
+  ) %>% filter(Variable != "99 = Not Answered") %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+# plot
+ggplot(sed_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      1.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+```
+
+## Item ownership
+
+```{r appendix-item-ownership}
+# make function to do this for all four
+
+plot_ownob <- function(sample_var, pew_var, title_text) {
+# get variables
+  var_map <- var_map_for(sample_var = sample_var, pew_var = pew_var)
+
+  # compute results for all designs
+  all_res <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+  raked_keys <- all_res %>% filter(Source == "unweighted") %>%
+    select(Variable)
+  pew_keys   <- all_res %>% filter(Source == "pew") %>%
+    select(Variable)
+  
+# fuzzy match
+  matches <- stringdist_inner_join(
+    raked_keys, pew_keys, by = "Variable",
+    method = "jw", max_dist = 0.3, distance_col = "dist"
+  ) %>%
+    group_by(Variable.x) %>%
+    slice_min(dist, n = 1) %>%
+    ungroup() %>%
+    transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label, choose our label
+  unified <- all_res %>%
+    left_join(matches, by = c("Variable" = "Var_pew")) %>%
+    mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+    select(-Var_raked)
+
+# clean variable text 
+  plot_df <- unified %>%
+    mutate(
+      Variable = str_to_title(
+        str_trim(
+          str_remove(
+            VariableUnified,
+            "^(OWNOB_[1-4]|OWNOB_[A-D]|[0-9]+\\s*=\\s*)"
+          )
+        )
+      ),
+      Variable = factor(str_wrap(Variable, width = 20)),
+      Source = factor(
+        Source,
+        levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                   "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                   "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+      )
+    ) %>% filter(Variable != "99 = Not Answered") %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+  # plot
+  ggplot(plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+    geom_point(position = position_dodge(width = 0.8)) +
+    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                  width = 0.2, position = position_dodge(width = 0.8)) +
+    xlab("") +
+    scale_color_discrete(
+      name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+    ) +
+    theme(
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.title  = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title= element_text(size = 13)
+    ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+    
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      1.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+}
+
+```
+
+### Menorah
+
+```{r appendix-menorah, fig.height=5, fig.width=12}
+plot_ownob("ownob_1", "OWNOB_A", "Menorah ownership?")
+
+```
+
+###  Mezuzah
+```{r appendix-mezuzah, fig.height=5, fig.width=12}
+plot_ownob("ownob_2", "OWNOB_B", "Mezuzah ownership?")
+```
+
+### Seder plate
+```{r appendix-sederplate, fig.height=5, fig.width=12}
+plot_ownob("ownob_3", "OWNOB_C", "Seder plate ownership?")
+```
+
+
+### Siddur
+
+```{r appendix-siddur, fig.height=5, fig.width=12}
+plot_ownob("ownob_4", "OWNOB_D", "Siddur (prayer book) ownership?")
+```
+
+## Bar/Bat Mitzvah
+
+```{r appendix-mitzvah, fig.height=5, fig.width=12}
+# get variables
+var_map <- var_map_for(sample_var = "mitzvah", pew_var = "MITZVAH")
+
+# compute results for all designs
+mit_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+mit_raked <- mit_all %>% filter(Source == "unweighted") %>% select(Variable)
+mit_pew   <- mit_all %>% filter(Source == "pew")           %>% select(Variable) 
+
+# fuzzy match
+
+mit_match <- stringdist_inner_join(
+  mit_raked, mit_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label, use ours instead
+mit_all_unified <- mit_all %>%
+  left_join(mit_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# clean labels
+mit_plot_df <- mit_all_unified %>%
+  mutate(
+    Variable = str_to_title(
+      str_trim(
+        str_remove(VariableUnified, "^(MITZVAH|[0-9]+\\s*=\\s*)")
+      )
+    ),
+    Variable = factor(str_wrap(Variable, width = 20)),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )
+  ) %>% filter(Variable != "99 = Not Answered") %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+# plot
+ggplot(mit_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      1.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+
+## Do you feel a sense of belonging to the Jewish people?
+
+```{r appendix-belong, fig.width=12, fig.height=6}
+# get variables
+var_map <- var_map_for(sample_var = "belong", pew_var = "BELONG")
+
+# compute results for all designs
+bel_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+bel_raked <- bel_all %>% filter(Source == "unweighted") %>% select(Variable)
+bel_pew   <- bel_all %>% filter(Source == "pew")           %>% select(Variable)
+
+# fuzzy match
+bel_match <- stringdist_inner_join(
+  bel_raked, bel_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label, choose our labels
+bel_all_unified <- bel_all %>%
+  left_join(bel_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# clean variable text
+bel_plot_df <- bel_all_unified %>%
+  mutate(
+    Variable = str_to_title(
+      str_trim(
+        str_remove(VariableUnified, "^(BELONG|[0-9]+\\s*=\\s*)")
+      )
+    ),
+    Variable = factor(
+      str_wrap(Variable, width = 20),
+      levels = str_wrap(
+        c("A Great Deal", "Some", "Not Much", "None At All"), width = 20
+      )
+    ),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )
+  ) %>%
+  filter(Variable != "99 = Not Answered") %>%
+    mutate(Variable = forcats::fct_rev(Variable)) %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+legend_order <- rev(c(
+  "pew",
+  "unweighted",
+  "raked.pew",
+  "ipw",
+  "ipw.5",
+  "ipw.8",
+  "ipw.10",
+  "ipw.12",
+  "ipw.raked.pew",
+  "ipw.raked.margins"
+))
+
+# plot
+ggplot(bel_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+  scale_color_discrete(
+    name = "Source",
+    limits = legend_order,
+    labels = c(
+      "pew"          = "2020 Pew Survey",
+      "unweighted"   = "2025 BISG Survey - Unweighted",
+      "raked.sample" = "2025 BISG Survey - Raked to Sample",
+      "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+      "ipw"          = "2025 BISG Survey - IPW",
+      "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+      "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+      "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+      "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+      "ipw.raked.sample" = "2025 BISG Survey - Raked to Sample after IPW",
+      "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+      "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+    )
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  ) +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+    
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      3.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+```
+
+## How many of your close friends are Jewish?
+
+```{r appendix-jfriend plot-app, fig.width=12, fig.height=8, echo=FALSE}
+# get variables
+var_map <- var_map_for(sample_var = "jfriend", pew_var = "JFRIEND")
+
+# compute results for all designs
+jfr_all <- imap_dfr(designs, ~ get_results(.x, var_map[[.y]], .y))
+
+# fuzzy match pew to one of the other samples -- select pew and one other
+jfr_raked <- jfr_all %>% filter(Source == "unweighted") %>% select(Variable)
+jfr_pew   <- jfr_all %>% filter(Source == "pew")           %>% select(Variable)
+
+# fuzzy match
+jfr_match <- stringdist_inner_join(
+  jfr_raked, jfr_pew, by = "Variable",
+  method = "jw", max_dist = 0.3, distance_col = "dist"
+) %>%
+  group_by(Variable.x) %>%
+  slice_min(dist, n = 1) %>%
+  ungroup() %>%
+  transmute(Var_raked = Variable.x, Var_pew = Variable.y)
+
+# join pew label onto our label
+jfr_all_unified <- jfr_all %>%
+  left_join(jfr_match, by = c("Variable" = "Var_pew")) %>%
+  mutate(VariableUnified = coalesce(Var_raked, Variable)) %>%
+  select(-Var_raked)
+
+# clean variable text 
+jfr_plot_df <- jfr_all_unified %>%
+  mutate(
+    Variable = str_to_title(
+      str_trim(
+        str_remove(VariableUnified, "^(JFRIEND|[0-9]+\\s*=\\s*)")
+      )
+    ),
+    Variable = factor(
+      str_wrap(Variable, width = 15),
+      levels = str_wrap(
+        c("All Of Them",
+          "Most Of Them",
+          "Some Of Them",
+          "Hardly Any Of Them",
+          "None Of Them",
+          "Not Sure"), width = 15
+      )
+    ),
+    Source = factor(
+      Source,
+      levels = c("pew", "unweighted", "raked.sample", "raked.pew",
+                 "ipw", "ipw.5", "ipw.8", "ipw.10", "ipw.12",
+                 "ipw.raked.sample", "ipw.raked.pew", "ipw.raked.margins")
+    )
+  ) %>%
+  filter(Variable != "99 = Not Answered") %>%
+    mutate(Variable = forcats::fct_rev(Variable)) %>%
+  mutate(Source = forcats::fct_rev(Source))
+
+legend_order <- rev(c(
+  "pew",
+  "unweighted",
+  "raked.pew",
+  "ipw",
+  "ipw.5",
+  "ipw.8",
+  "ipw.10",
+  "ipw.12",
+  "ipw.raked.pew",
+  "ipw.raked.margins"
+))
+
+# plot
+ggplot(jfr_plot_df, aes(x = Variable, y = Estimate, color = Source)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, position = position_dodge(width = 0.8)) +
+  xlab("") +
+scale_color_discrete(
+  name = "Source",
+  limits = legend_order,
+  labels = c(
+    "pew"          = "2020 Pew Survey",
+    "unweighted"   = "2025 BISG Survey - Unweighted",
+    "raked.pew"    = "2025 BISG Survey - Raked to Pew",
+    "ipw"          = "2025 BISG Survey - IPW",
+    "ipw.5"        = "2025 BISG Survey - IPW (5/95 trim)",
+    "ipw.8"        = "2025 BISG Survey - IPW (8/92 trim)",
+    "ipw.10"       = "2025 BISG Survey - IPW (10/90 trim)",
+    "ipw.12"       = "2025 BISG Survey - IPW (12/88 trim)",
+    "ipw.raked.pew" = "2025 BISG Survey - Raked to Pew after IPW",
+    "ipw.raked.margins" = "2025 BISG Survey - Raked to Estimated Margins after IPW"
+  )
+) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title  = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title= element_text(size = 13)
+  )  +   theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+            panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+
+   
+
+  ) + geom_vline(
+    xintercept = seq(
+      1.5,
+      5.5,
+      by = 1
+    ),
+    color = "black",
+    linewidth = 0.3,
+    alpha = 0.6
+  ) + coord_flip() + guides(color = guide_legend(reverse = TRUE))
+
+
+```
+
+
+```{r ces, echo=FALSE}
+
+## make CES survey design
+CES25_Common <- read_dta("/data/dataverse_files/CES25_Common.dta")
+
+# filter to only jews
+ces <- CES25_Common %>% filter(religpew == 5)
+
+#make survey design
+ces.svy.3 <- svydesign(ids = ~1, data = ces, weights = ~commonweight)
+
+# extract codes from numbers or labels like "1 = MORE THAN ONCE A WEEK"
+get_code <- function(x) {
+  if (is.numeric(x)) {
+    return(as.numeric(x))
+  }
+  
+  suppressWarnings(
+    as.numeric(str_extract(as.character(x), "^\\s*[0-9]+"))
+  )
+}
+
+# recode pew to match, filter to just jewish respondents
+pew_plot_design <- subset(pew.svy, get_code(JEWISHCAT) %in% c(1, 2))
+
+pew_plot_design$variables <- pew_plot_design$variables %>%
+  mutate(
+    attend_clean = case_when(
+      get_code(ATTEND1) == 1 ~ "More than once a week",
+      get_code(ATTEND1) == 2 ~ "Once a week",
+      get_code(ATTEND1) == 3 ~ "Once or twice a month",
+      get_code(ATTEND1) == 4 ~ "A few times a year",
+      get_code(ATTEND1) == 5 ~ "Seldom",
+      get_code(ATTEND1) == 6 ~ "Never",
+      TRUE ~ NA_character_
+    ),
+    branch_clean = case_when(
+      is.na(BRANCH) ~ NA_character_,
+      as.character(BRANCH) == "REFORM" ~ "Reform",
+      as.character(BRANCH) == "CONSERVATIVE" ~ "Conservative",
+      as.character(BRANCH) == "ORTHODOX" ~ "Orthodox",
+      TRUE ~ "Other / None"
+    ),
+    race_clean = case_when(
+      get_code(RACECMB) == 1 ~ "White",
+      get_code(RACECMB) %in% 2:5 ~ "Non-White",
+      TRUE ~ NA_character_
+    ),
+    educ_clean = case_when(
+      get_code(EDUC4CAT) == 1 ~ "HS or less",
+      get_code(EDUC4CAT) == 2 ~ "Some college / Associate",
+      get_code(EDUC4CAT) == 3 ~ "BA",
+      get_code(EDUC4CAT) == 4 ~ "Graduate degree",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # set category order
+  mutate(
+    attend_clean = factor(
+      attend_clean,
+      levels = c("More than once a week", "Once a week", "Once or twice a month", "A few times a year", "Seldom", "Never")
+    ),
+    branch_clean = factor(
+      branch_clean,
+      levels = c("Reform", "Conservative", "Orthodox", "Other / None")
+    ),
+    race_clean = factor(
+      race_clean,
+      levels = c("White", "Non-White")
+    ),
+    educ_clean = factor(
+      educ_clean,
+      levels = c("HS or less", "Some college / Associate", "BA", "Graduate degree")
+    )
+  )
+
+# recode ipw.raked.pew to match
+bisg_pew_design <- subset(svy.ipw.raked.pew, jewish == 1)
+
+bisg_pew_design$variables <- bisg_pew_design$variables %>%
+  mutate(
+    attend_clean = case_when(
+      attend1 == "More than once a week" ~ "More than once a week",
+      attend1 == "Once a week" ~ "Once a week",
+      attend1 == "Once or twice a month" ~ "Once or twice a month",
+      attend1 == "A few times a year, such as for High Holidays" ~ "A few times a year",
+      attend1 == "Seldom" ~ "Seldom",
+      attend1 == "Never" ~ "Never",
+      TRUE ~ NA_character_
+    ),
+    branch_clean = case_when(
+      is.na(branch) ~ NA_character_,
+      branch == "Reform" ~ "Reform",
+      branch == "Conservative" ~ "Conservative",
+      branch == "Orthodox" ~ "Orthodox",
+      TRUE ~ "Other / None"
+    ),
+    race_clean = case_when(
+      is.na(racemod) ~ NA_character_,
+      racemod == "White" ~ "White",
+      TRUE ~ "Non-White"
+    ),
+    educ_clean = case_when(
+      str_detect(
+        as.character(educ_acs),
+        regex(
+          "no schooling|nursery|kindergarten|grade|high school|GED|alternative credential",
+          ignore_case = TRUE
+        )
+      ) ~ "HS or less",
+      str_detect(
+        as.character(educ_acs),
+        regex("college credit|associate", ignore_case = TRUE)
+      ) ~ "Some college / Associate",
+      str_detect(
+        as.character(educ_acs),
+        regex("^bachelor", ignore_case = TRUE)
+      ) ~ "BA",
+      str_detect(
+        as.character(educ_acs),
+        regex("master|doctorate|professional degree", ignore_case = TRUE)
+      ) ~ "Graduate degree",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # set category order
+  mutate(
+    attend_clean = factor(
+      attend_clean,
+      levels = c("More than once a week", "Once a week", "Once or twice a month", "A few times a year", "Seldom", "Never")
+    ),
+    branch_clean = factor(
+      branch_clean,
+      levels = c("Reform", "Conservative", "Orthodox", "Other / None")
+    ),
+    race_clean = factor(
+      race_clean,
+      levels = c("White", "Non-White")
+    ),
+    educ_clean = factor(
+      educ_clean,
+      levels = c("HS or less", "Some college / Associate", "BA", "Graduate degree")
+    )
+  )
+
+# recode ipw.raked.margins to match
+bisg_margins_design <- subset(svy.ipw.raked.margins, jewish == 1)
+
+bisg_margins_design$variables <- bisg_margins_design$variables %>%
+  mutate(
+    attend_clean = case_when(
+      attend1 == "More than once a week" ~ "More than once a week",
+      attend1 == "Once a week" ~ "Once a week",
+      attend1 == "Once or twice a month" ~ "Once or twice a month",
+      attend1 == "A few times a year, such as for High Holidays" ~ "A few times a year",
+      attend1 == "Seldom" ~ "Seldom",
+      attend1 == "Never" ~ "Never",
+      TRUE ~ NA_character_
+    ),
+    branch_clean = case_when(
+      is.na(branch) ~ NA_character_,
+      branch == "Reform" ~ "Reform",
+      branch == "Conservative" ~ "Conservative",
+      branch == "Orthodox" ~ "Orthodox",
+      TRUE ~ "Other / None"
+    ),
+    race_clean = case_when(
+      is.na(racemod) ~ NA_character_,
+      racemod == "White" ~ "White",
+      TRUE ~ "Non-White"
+    ),
+    educ_clean = case_when(
+      str_detect(
+        as.character(educ_acs),
+        regex(
+          "no schooling|nursery|kindergarten|grade|high school|GED|alternative credential",
+          ignore_case = TRUE
+        )
+      ) ~ "HS or less",
+      str_detect(
+        as.character(educ_acs),
+        regex("college credit|associate", ignore_case = TRUE)
+      ) ~ "Some college / Associate",
+      str_detect(
+        as.character(educ_acs),
+        regex("^bachelor", ignore_case = TRUE)
+      ) ~ "BA",
+      str_detect(
+        as.character(educ_acs),
+        regex("master|doctorate|professional degree", ignore_case = TRUE)
+      ) ~ "Graduate degree",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # set category order
+  mutate(
+    attend_clean = factor(
+      attend_clean,
+      levels = c("More than once a week", "Once a week", "Once or twice a month", "A few times a year", "Seldom", "Never")
+    ),
+    branch_clean = factor(
+      branch_clean,
+      levels = c("Reform", "Conservative", "Orthodox", "Other / None")
+    ),
+    race_clean = factor(
+      race_clean,
+      levels = c("White", "Non-White")
+    ),
+    educ_clean = factor(
+      educ_clean,
+      levels = c("HS or less", "Some college / Associate", "BA", "Graduate degree")
+    )
+  )
+
+# recode ipw.10 to match
+bisg_ipw_design <- subset(svy.ipw.10, jewish == 1)
+
+bisg_ipw_design$variables <- bisg_ipw_design$variables %>%
+  mutate(
+    attend_clean = case_when(
+      attend1 == "More than once a week" ~ "More than once a week",
+      attend1 == "Once a week" ~ "Once a week",
+      attend1 == "Once or twice a month" ~ "Once or twice a month",
+      attend1 == "A few times a year, such as for High Holidays" ~ "A few times a year",
+      attend1 == "Seldom" ~ "Seldom",
+      attend1 == "Never" ~ "Never",
+      TRUE ~ NA_character_
+    ),
+    branch_clean = case_when(
+      is.na(branch) ~ NA_character_,
+      branch == "Reform" ~ "Reform",
+      branch == "Conservative" ~ "Conservative",
+      branch == "Orthodox" ~ "Orthodox",
+      TRUE ~ "Other / None"
+    ),
+    race_clean = case_when(
+      is.na(racemod) ~ NA_character_,
+      racemod == "White" ~ "White",
+      TRUE ~ "Non-White"
+    ),
+    educ_clean = case_when(
+      str_detect(
+        as.character(educ_acs),
+        regex(
+          "no schooling|nursery|kindergarten|grade|high school|GED|alternative credential",
+          ignore_case = TRUE
+        )
+      ) ~ "HS or less",
+      str_detect(
+        as.character(educ_acs),
+        regex("college credit|associate", ignore_case = TRUE)
+      ) ~ "Some college / Associate",
+      str_detect(
+        as.character(educ_acs),
+        regex("^bachelor", ignore_case = TRUE)
+      ) ~ "BA",
+      str_detect(
+        as.character(educ_acs),
+        regex("master|doctorate|professional degree", ignore_case = TRUE)
+      ) ~ "Graduate degree",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # set category order
+  mutate(
+    attend_clean = factor(
+      attend_clean,
+      levels = c("More than once a week", "Once a week", "Once or twice a month", "A few times a year", "Seldom", "Never")
+    ),
+    branch_clean = factor(
+      branch_clean,
+      levels = c("Reform", "Conservative", "Orthodox", "Other / None")
+    ),
+    race_clean = factor(
+      race_clean,
+      levels = c("White", "Non-White")
+    ),
+    educ_clean = factor(
+      educ_clean,
+      levels = c("HS or less", "Some college / Associate", "BA", "Graduate degree")
+    )
+  )
+
+# recode ces to match
+ces_plot_design <- subset(ces.svy.3, get_code(religpew) == 5)
+
+ces_plot_design$variables <- ces_plot_design$variables %>%
+  mutate(
+    attend_clean = case_when(
+      get_code(pew_churatd) == 1 ~ "More than once a week",
+      get_code(pew_churatd) == 2 ~ "Once a week",
+      get_code(pew_churatd) == 3 ~ "Once or twice a month",
+      get_code(pew_churatd) == 4 ~ "A few times a year",
+      get_code(pew_churatd) == 5 ~ "Seldom",
+      get_code(pew_churatd) == 6 ~ "Never",
+      TRUE ~ NA_character_
+    ),
+    branch_clean = case_when(
+      get_code(religpew_jewish) == 1 ~ "Reform",
+      get_code(religpew_jewish) == 2 ~ "Conservative",
+      get_code(religpew_jewish) == 3 ~ "Orthodox",
+      get_code(religpew_jewish) %in% c(4, 90) ~ "Other / None",
+      TRUE ~ NA_character_
+    ),
+    race_clean = case_when(
+      get_code(race) == 1 ~ "White",
+      get_code(race) %in% 2:8 ~ "Non-White",
+      TRUE ~ NA_character_
+    ),
+    educ_clean = case_when(
+      get_code(educ) %in% c(1, 2) ~ "HS or less",
+      get_code(educ) %in% c(3, 4) ~ "Some college / Associate",
+      get_code(educ) == 5 ~ "BA",
+      get_code(educ) == 6 ~ "Graduate degree",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  # set category order
+  mutate(
+    attend_clean = factor(
+      attend_clean,
+      levels = c("More than once a week", "Once a week", "Once or twice a month", "A few times a year", "Seldom", "Never")
+    ),
+    branch_clean = factor(
+      branch_clean,
+      levels = c("Reform", "Conservative", "Orthodox", "Other / None")
+    ),
+    race_clean = factor(
+      race_clean,
+      levels = c("White", "Non-White")
+    ),
+    educ_clean = factor(
+      educ_clean,
+      levels = c("HS or less", "Some college / Associate", "BA", "Graduate degree")
+    )
+  )
+
+# calculate weighted percentages and 95% confidence intervals
+# use this same calculation for each variable and survey
+# categories have already been combined above, before estimating
+get_results <- function(design, variable, panel, source) {
+  design$variables$plot_category <- design$variables[[variable]]
+  
+  estimates <- svymean(~plot_category, design, na.rm = TRUE)
+  intervals <- confint(estimates)
+  
+  tibble(
+    Panel = panel,
+    Category = levels(design$variables$plot_category),
+    Source = source,
+    Estimate = as.numeric(coef(estimates)) * 100,
+    CI_lower = as.numeric(intervals[, 1]) * 100,
+    CI_upper = as.numeric(intervals[, 2]) * 100
+  )
+}
+
+# attendance estimates
+attendance_results <- bind_rows(
+  get_results(
+    pew_plot_design, "attend_clean", "Attendance", "pew"
+  ),
+  get_results(
+    bisg_pew_design, "attend_clean", "Attendance", "ipw.raked.pew"
+  ),
+  get_results(
+    bisg_margins_design, "attend_clean", "Attendance", "ipw.raked.margins"
+  ),
+  get_results(
+    bisg_ipw_design, "attend_clean", "Attendance", "ipw.10"
+  ),
+  get_results(
+    ces_plot_design, "attend_clean", "Attendance", "ces"
+  )
+)
+
+# denomination estimates
+branch_results <- bind_rows(
+  get_results(
+    pew_plot_design, "branch_clean", "Denomination", "pew"
+  ),
+  get_results(
+    bisg_pew_design, "branch_clean", "Denomination", "ipw.raked.pew"
+  ),
+  get_results(
+    bisg_margins_design, "branch_clean", "Denomination", "ipw.raked.margins"
+  ),
+  get_results(
+    bisg_ipw_design, "branch_clean", "Denomination", "ipw.10"
+  ),
+  get_results(
+    ces_plot_design, "branch_clean", "Denomination", "ces"
+  )
+)
+
+# race estimates
+race_results <- bind_rows(
+  get_results(
+    pew_plot_design, "race_clean", "Race", "pew"
+  ),
+  get_results(
+    bisg_pew_design, "race_clean", "Race", "ipw.raked.pew"
+  ),
+  get_results(
+    bisg_margins_design, "race_clean", "Race", "ipw.raked.margins"
+  ),
+  get_results(
+    bisg_ipw_design, "race_clean", "Race", "ipw.10"
+  ),
+  get_results(
+    ces_plot_design, "race_clean", "Race", "ces"
+  )
+)
+
+# education estimates
+education_results <- bind_rows(
+  get_results(
+    pew_plot_design, "educ_clean", "Education", "pew"
+  ),
+  get_results(
+    bisg_pew_design, "educ_clean", "Education", "ipw.raked.pew"
+  ),
+  get_results(
+    bisg_margins_design, "educ_clean", "Education", "ipw.raked.margins"
+  ),
+  get_results(
+    bisg_ipw_design, "educ_clean", "Education", "ipw.10"
+  ),
+  get_results(
+    ces_plot_design, "educ_clean", "Education", "ces"
+  )
+)
+
+# combine results into one file
+comparison_results <- bind_rows(
+  attendance_results,
+  branch_results,
+  race_results,
+  education_results
+)
+
+# make sure this worked
+table(comparison_results$Panel, comparison_results$Source)
+comparison_results
+
+# set source and panel order
+source_order <- c(
+  "pew",
+  "ipw.raked.pew",
+  "ipw.raked.margins",
+  "ipw.10",
+  "ces"
+)
+
+comparison_results <- comparison_results %>%
+  mutate(
+    Panel = factor(
+      Panel,
+      levels = c("Attendance", "Denomination", "Race", "Education")
+    ),
+    Category = factor(
+      Category,
+      levels = rev(c(
+        "More than once a week",
+        "Once a week",
+        "Once or twice a month",
+        "A few times a year",
+        "Seldom",
+        "Never",
+        "Reform",
+        "Conservative",
+        "Orthodox",
+        "Other / None",
+        "White",
+        "Non-White",
+        "HS or less",
+        "Some college / Associate",
+        "BA",
+        "Graduate degree"
+      ))
+    ),
+    Source = factor(Source, levels = rev(source_order))
+  )
+
+# plot percentages and confidence intervals
+comparison_plot <- ggplot(
+  comparison_results,
+  aes(
+    x = Estimate,
+    y = Category,
+    color = Source,
+    group = Source
+  )
+) +
+  geom_point(
+    position = position_dodge(width = 0.9),
+    size = 1.5
+  ) +
+  geom_errorbarh(
+    aes(xmin = CI_lower, xmax = CI_upper),
+    height = 0.08,
+    linewidth = 0.4,
+    position = position_dodge(width = 0.9)
+  ) +
+  facet_wrap(~Panel, ncol = 2, scales = "free_y") +
+  scale_x_continuous(breaks = seq(0, 100, 25)) +
+  coord_cartesian(xlim = c(0, 100)) +
+  scale_color_manual(
+    name = "Source",
+    values = c(
+      "pew" = "#00BFC4",
+      "ipw.raked.pew" = "#F8766D",
+      "ipw.raked.margins" = "#619CFF",
+      "ipw.10" = "#E69F00",
+      "ces" = "#7CAE00"
+    ),
+    breaks = source_order,
+    labels = c(
+      "pew" = "2020 Pew Survey",
+      "ipw.raked.pew" = "2025 BISG: IPW Raked to Pew",
+      "ipw.raked.margins" = "2025 BISG: IPW Raked to Estimated Margins",
+      "ipw.10" = "2025 BISG: IPW with 10/90 trimming only",
+      "ces" = "2025 CES Survey"
+    )
+  ) +
+  labs(x = "Percent", y = NULL) +
+  theme_minimal(base_size = 10) +
+  theme(
+    strip.text = element_text(size = 11, face = "bold"),
+    axis.text.y = element_text(size = 9, margin = margin(r = 8)),
+    axis.text.x = element_text(size = 9),
+    axis.title.x = element_text(size = 10),
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.5),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = grid::unit(1.2, "lines"),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
+    plot.margin = margin(10, 10, 10, 10)
+  ) +
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))
+
+print(comparison_plot)
+
+
+```
+

@@ -6,9 +6,9 @@ library(tidyverse)
 ##########################################################################
 #' Get list of States and their abbreviations and get pre-gen list of names
 ##########################################################################
-# df_states <- read_csv("../../Data/states.csv")
+# df_states <- read_csv("../../data/states.csv")
 # df_states = df_states[order(df_states$Abbreviation),] #make sure alphabetical order by abbreviation, not state name!
-# #write_csv(df_states, "../../Data/states.csv") #save so that this is the default elsewhere
+# #write_csv(df_states, "../../data/states.csv") #save so that this is the default elsewhere
 #
 # n_states <- dim(df_states)[1]
 # n_names <- 100
@@ -19,23 +19,23 @@ library(tidyverse)
 ##########################################################################
 #' COUNTY-JEWISH DATA
 ##########################################################################
-# filename <- "../../DATA/JewishCountyCounts/brandeis_fips_pop_counts-proc-V2.csv"
+# filename <- "../../data/JewishCountyCounts/brandeis_fips_pop_counts-proc-V2.csv"
 # county_counts2 <- read_csv(filename)
-# fips2state = readRDS("../../Data/DataObjects/fips2state.RDS")
+# fips2state = readRDS("../../data/DataObjects/fips2state.RDS")
 #
 # fips_codes <- as.character(county_counts2$fips)
 #
 # # see generate_fips_state_proportions.R for code to generate these
-# pR1 = readRDS("../../Data/DataObjects/pR1.RDS")
-# p_R1_gvn_fips = readRDS("../../Data/DataObjects/p_R1_gvn_fips.RDS")
-# p_R0_gvn_fips = readRDS("../../Data/DataObjects/p_R0_gvn_fips.RDS")
-# p_fips_gvn_R1 = readRDS("../../Data/DataObjects/p_fips_gvn_R1.RDS")
-# p_fips_gvn_R0 = readRDS("../../Data/DataObjects/p_fips_gvn_R0.RDS")
+# pR1 = readRDS("../../data/DataObjects/pR1.RDS")
+# p_R1_gvn_fips = readRDS("../../data/DataObjects/p_R1_gvn_fips.RDS")
+# p_R0_gvn_fips = readRDS("../../data/DataObjects/p_R0_gvn_fips.RDS")
+# p_fips_gvn_R1 = readRDS("../../data/DataObjects/p_fips_gvn_R1.RDS")
+# p_fips_gvn_R0 = readRDS("../../data/DataObjects/p_fips_gvn_R0.RDS")
 #
-# p_state_gvn_R1 = readRDS("../../Data/DataObjects/p_state_gvn_R1.RDS")
-# p_state_gvn_R0 = readRDS("../../Data/DataObjects/p_state_gvn_R0.RDS")
-# p_R1_gvn_state = readRDS("../../Data/DataObjects/p_R1_gvn_state.RDS")
-# p_R0_gvn_state = readRDS("../../Data/DataObjects/p_R0_gvn_state.RDS")
+# p_state_gvn_R1 = readRDS("../../data/DataObjects/p_state_gvn_R1.RDS")
+# p_state_gvn_R0 = readRDS("../../data/DataObjects/p_state_gvn_R0.RDS")
+# p_R1_gvn_state = readRDS("../../data/DataObjects/p_R1_gvn_state.RDS")
+# p_R0_gvn_state = readRDS("../../data/DataObjects/p_R0_gvn_state.RDS")
 #
 
 ##########################################################################
@@ -104,9 +104,6 @@ get_p_surname_gvn_R1 <- function(pmat, p_state_gvn_R1){
   p <- t(as.matrix(p)) # same format as others
   return(p)
 }
-
-
-
 
 #' ######################################
 #' FUNCTION TO GENERATE DATA FRAME
@@ -278,44 +275,6 @@ generate_sampling_frame <- function(pmat, pmat_flip, n1, pR1, p_state_gvn_R1,
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-#TODO: add FIPs version to get_p_R1_gvn_state_surname
-# uses assumption S \perp Fips | state, R  (which is built to hold here)
-#------------------------------------------------------
-# # Calculate overall P(R=1|S,fips)
-# final <- matrix(NA, nrow = n_names, ncol = length(fips_codes))
-# colnames(final) <- fips_codes
-# rownames(final) <- surnames
-# for (f in fips_codes) {
-#   st <- fips2state[[f]]
-#   num <- ps3mat[, st] * p_R1_gvn_fips[[f]]
-#   den <- ps3mat[, st] * p_R1_gvn_fips[[f]] + pmat_flip[, st] * (1 - p_R1_gvn_fips[[f]])
-#   final[, f] <- num / den
-# }
-#
-# # sanity check - what are highest probability fips?
-# print(final[which.max(final)])
-# i <- which(apply(final >= final[which.max(final)]-.1, 1, sum) != 0)
-# j <- which(apply(final >= final[which.max(final)]-.1, 2, sum) != 0)
-# states <- unique(fips2state[names(j)])
-# for (st in states) {
-#   print(st)
-#   print(ps3mat[i, st])
-#   print(pmat_flip[i, st])
-# }
-# filter(county_counts2, fips %in% !!names(j))
-
-#saveRDS(final, paste0(folder_path, "/p_R1_gvn_S_fips.RDS"))
 
 
 # Could turn these matrices into dataframes to save but file sizes bigger!

@@ -1,7 +1,12 @@
-#'
-#' Create per-setting plots
-#' This can take some time to run
-#'
+#
+# Author: Kyla Chasalow
+#
+# Analyze files created by 5_ script
+#
+#
+# Create per-setting plots
+# This can take some time to run.
+#
 
 library(tidyverse)
 library(glue)
@@ -19,8 +24,6 @@ grid_filepath = fs::path(glue("{save_path}/grid_results.csv"))
 
 tempfile_path = fs::path(glue("{save_path}/tempfiles"))
 df = merge_tf_csvs(tempfile_path, pattern = "^tf_.*\\.csv$")
-
-
 
 
 #-------------------------------------------------------------------------------
@@ -202,7 +205,6 @@ single_analysis <- function(files_to_process,
   }
 }
 
-
 #----------------------------------------------------------------------------
 raw_lists <- get_leaf_raw_outputs(per_setting_results_path)
 #----------------------------------------------------------------------------
@@ -216,79 +218,3 @@ for (save_path in names(raw_lists)){
                   create_density_plots = F,
                   create_trace_plots = T)
 }
-
-
-# files_to_process = raw_lists$`results/MCMC_simulation/per_setting_results/names100/n100000/alpha_uniform/num_iter_10000`
-# single_analysis(files_to_process = raw_lists$`results/MCMC_simulation/per_setting_results/names100/n100000/alpha_uniform/num_iter_10000`,
-#                             save_path = "results/MCMC_simulation/per_setting_results/names100/n100000/alpha_uniform/num_iter_10000",
-#                             create_density_plots = F,
-#                             create_trace_plots = T)
-
-
-#-------------------------------------------------------------------------------
-# GELMAN-RUBIN Diagnostics
-#-------------------------------------------------------------------------------
-#TODO: for now, not focusing on this - might revisit later
-#TODO: code below continues from the code that is now in single_analysis() above
-#
-# # Convert to format needed for Gelman-Rubin
-# a_mcmc_list = vector("list", n_chains)
-# eta_mcmc_list = vector("list", n_chains)
-# for (i in 1:n_chains){
-#   a_mcmc_list[[i]] = mcmc(a_chains[,i,]) #each object of list is an mcmc object
-#   eta_mcmc_list[[i]] = mcmc(eta_chains[,i,])
-# }
-# a_mcmc_list = mcmc.list(a_mcmc_list)
-# eta_mcmc_list = mcmc.list(eta_mcmc_list)
-#
-# #gelman rubin diagnostic
-# eta_diagnostics = gelman.diag(eta_mcmc_list)
-# a_diagnostics = gelman.diag(a_mcmc_list)
-# a_diagnostics
-# eta_diagnostics
-#
-# # 100 parameters took .85 seconds -- so 70000 would take 595 seconds...
-# # assuming linear increase (which may not be).
-# start = Sys.time()
-# out = gelman.diag(a_mcmc_list)
-# end = Sys.time()
-# print(end-start)
-#
-#
-# #calculate diagnostic at different points along chain
-# cutoffs = seq(100,n_iter, by = 500)
-#
-# point.max = rep(NA, length(cutoffs))
-# upper.CI.max = rep(NA, length(cutoffs))
-# point.mean = rep(NA, length(cutoffs))
-# upper.CI.mean = rep(NA, length(cutoffs))
-#
-# for (i in 1:length(cutoffs)){
-#   print(paste0("Cutoff",i))
-#   c = cutoffs[i]
-#   chainsub = mcmc.list(lapply(a_mcmc_list, function(x){mcmc(x[1:c,])} ))
-#   diagnostics = gelman.diag(chainsub, transform = T)#use transform?
-#   point.max[i] = max(diagnostics$psrf[,"Point est."])
-#   upper.CI.max[i] = max(diagnostics$psrf[,"Upper C.I."])
-#   point.mean[i] = mean(diagnostics$psrf[,"Point est."])
-#   upper.CI.mean[i] = mean(diagnostics$psrf[,"Upper C.I."])
-# }
-#
-# par(mfrow = c(1,2))
-# plot(cutoffs, point.max, "l", ylim = c(1, max(point.max)),
-#      main = "Point Estimate", col = "red",
-#      ylab = "GR Diagnostic")
-# lines(cutoffs, point.mean, col = "blue")
-# abline(h=1.1, col = "black", lty = 2)
-# abline(h=1, col = "black", lty = 2)
-#
-# plot(cutoffs, upper.CI.max, "l", ylim = c(1, max(point.max)),
-#      main = "Upper CI", col = "red",
-#      ylab = "GR Diagnostic")
-# lines(cutoffs, upper.CI.mean, col = "blue")
-# abline(h=1.1, col = "black", lty = 2)
-# abline(h=1, col = "black", lty = 2)
-# legend("topright", legend = c("Max","Mean"), col = c("red","blue"), lwd =2)
-#
-
-

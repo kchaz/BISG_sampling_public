@@ -1,7 +1,9 @@
-#'
-#' Simulate performance of sampler with repeat generation of data,
-#' and varying some sampler settings
-#' ----------------------------------------------------------------
+#
+# Author: Kyla Chasalow
+#
+# Simulate performance of sampler with repeat generation of data,
+# and varying some sampler settings
+#
 # Libraries
 library(readr)
 library(gtools) # for rdirichlet
@@ -15,26 +17,26 @@ library(future.apply)
 source("simulation_tools.R")
 source("simulation_error_calculators.R")
 source("data_generators.R") # functions for simulating data
-source("../dataprep/data_processing_helpers.R")
-source("../sampler/HBayesSampler/sampler_analysis_helpers.R")
-sourceCpp("../sampler/HBayesSampler/sampler.cpp")
-source("../sampler/HBayesSampler/sampler_Rversion.R")
+source("../2_sampler/HBayesSampler/data_prep_helpers.R")
+source("../2_sampler/HBayesSampler/sampler_analysis_helpers.R")
+sourceCpp("../2_sampler/HBayesSampler/sampler.cpp")
+source("../2_sampler/HBayesSampler/sampler_Rversion.R")
 
 #-------------------------------------------------------------------------------
 # Things that are fixed throughout
 #-------------------------------------------------------------------------------
 
 # State information
-df_states <- read_csv("../../Data/states.csv")
+df_states <- read_csv("../../data/states.csv")
 df_states <- df_states[order(df_states$Abbreviation), ] # make sure alphabetical order by abbreviation, not state name!
 n_states <- dim(df_states)[1]
 
 # AJPP info
-pR1 <- readRDS("../../Data/DataObjects/pR1.RDS")
-p_state_gvn_R1 <- readRDS("../../Data/DataObjects/p_state_gvn_R1.RDS")
-p_state_gvn_R0 <- readRDS("../../Data/DataObjects/p_state_gvn_R0.RDS")
-p_R1_gvn_state <- readRDS("../../Data/DataObjects/p_R1_gvn_state.RDS")
-p_R0_gvn_state <- readRDS("../../Data/DataObjects/p_R0_gvn_state.RDS")
+pR1 <- readRDS("../../data/DataObjects/pR1.RDS")
+p_state_gvn_R1 <- readRDS("../../data/DataObjects/p_state_gvn_R1.RDS")
+p_state_gvn_R0 <- readRDS("../../data/DataObjects/p_state_gvn_R0.RDS")
+p_R1_gvn_state <- readRDS("../../data/DataObjects/p_R1_gvn_state.RDS")
+p_R0_gvn_state <- readRDS("../../data/DataObjects/p_R0_gvn_state.RDS")
 
 #-------------------------------------------------------------------------------
 # Location and type of output to save, path for results df
@@ -159,7 +161,7 @@ single_run <- function(settings,
 
   # Fit sampler
   start <- Sys.time()
-  out <- runMCMC1(D, # for R version, add R_ in front
+  out <- runMCMC(D, # for R version, add R_ in front
     ng = ng,
     niter = niter,
     init_a, init_eta,

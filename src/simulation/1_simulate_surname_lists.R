@@ -1,8 +1,16 @@
+#
+# Author: Kyla Chasalow
+#
+# NOTE: must set working directory to source file before running
+#
 # NOTE: this code is meant to be run only once
 # to generate lists of fake surnames that will then
 # be used across all simulated data
 set.seed(25)
 k = 10000
+
+save_path = "simulated_data/"
+fs::dir_create(save_path)
 
 surnames <- replicate(k, paste0(sample(letters, 6, replace = T),
                                       collapse = ""))

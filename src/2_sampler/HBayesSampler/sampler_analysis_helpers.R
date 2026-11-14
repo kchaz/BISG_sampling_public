@@ -1,3 +1,10 @@
+#'
+#' Author: Kyla Chasalow
+#'
+#' Functions for analyzing output of the sampler.
+#'
+#' AI use: none
+#'
 library(glue)
 
 #-------------------------------------------------------
@@ -29,20 +36,6 @@ get_sampler1_accept_stats <- function(out, burnin = 1){
 #-------------------------------------------
 # Chain Plotters
 #-------------------------------------------
-# plot_eta_chain <- function(out, burnin = 1){
-#   niter = length(out$eta_chain)-1
-#   eta_chain = out$eta_chain[burnin:(niter+1)]
-#   postmean = mean(eta_chain)
-#   par(mfrow = c(1, 1))
-#   plot(burnin:(niter + 1), eta_chain,
-#        main = "eta",
-#        "l",
-#        xlab = "iterations",
-#        ylab = "eta")
-#   abline(h = postmean,col = "red")
-#   return(postmean)
-# }
-
 plot_eta_chain <- function(out, burnin = 1, xlab = "Index") {
   niter <- length(out$eta_chain) - 1
   eta_chain <- out$eta_chain[burnin:(niter + 1)]
@@ -59,7 +52,7 @@ plot_eta_chain <- function(out, burnin = 1, xlab = "Index") {
     col = "gray30",
     xlab = xlab,
     ylab = expression(eta),
-    main = expression("Trace plot of " * eta),
+    main = expression(bold("Trace plot of " * eta)),
     cex.main = 2,
     cex.lab = 2
   )
@@ -73,11 +66,8 @@ plot_eta_chain <- function(out, burnin = 1, xlab = "Index") {
 }
 
 
-
-
-
 plot_a_chain = function(out, indices, burnin = 1, labels = NULL, xlab = "Index"){
-  par(mfrow = c(3,3))
+  par(mfrow = c(2,3))
   niter = length(out$eta_chain) - 1
   a_chain = out$a_chain[,burnin:(niter+1)]
 
@@ -175,18 +165,10 @@ get_alpha_and_eta_postmeans <- function(out, burnin = 1, upper_cutoffs = NULL){
 
 
 #---------------------------------
-# Sampler 1 get postmean for theta
+# Get postmean for theta
 # These two have Rcpp versions too
 # but there seems to still be a bug that sometimes makes them crash...
 #---------------------------------
-
-# Old less efficient version
-# R_get_postmean_mat1_old <- function(D, c, a, ng){
-#   num = apply(D, 2, function(col){col + c * a})
-#   means = t(t(num) / (ng + c)) #divide each column
-#   return(means)
-# }
-
 
 R_get_postmean_mat1 <- function(D, eta, alpha, ng) {
   # D: |S| x |G|
@@ -215,8 +197,6 @@ R_get_thetameans1 <- function(D, ng, out, burnin = 1, upper = NULL){
   }
   return(holder/(upper - burnin + 1))
 }
-
-
 
 #------------------------------------
 # analyze eta via rho
@@ -288,8 +268,6 @@ analyze_rho <- function(out, ng, burnin = 1, upper = NULL){
 }
 
 
-
-
 plot_rho_chain <- function(rho_mat, state, xlab = "Index") {
   niter <- length(out$eta_chain) - 1
   par(
@@ -315,7 +293,3 @@ plot_rho_chain <- function(rho_mat, state, xlab = "Index") {
     lty = 1
   )
 }
-
-
-
-
